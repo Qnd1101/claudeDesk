@@ -31,7 +31,7 @@
 | Windows (x64) | `claudedesk-vX.Y.Z-x86_64-pc-windows-msvc.zip` |
 | macOS (Apple Silicon) | `claudedesk-vX.Y.Z-aarch64-apple-darwin.tar.gz` |
 | macOS (Intel) | `claudedesk-vX.Y.Z-x86_64-apple-darwin.tar.gz` |
-| Linux (x64) | `claudedesk-vX.Y.Z-x86_64-unknown-linux-gnu.tar.gz` |
+| Linux (x64, static) | `claudedesk-vX.Y.Z-x86_64-unknown-linux-musl.tar.gz` |
 
 **Windows**
 1. `.zip`을 풀고 `claudedesk.exe`를 원하는 폴더(예: `C:\Tools\`)에 둡니다.

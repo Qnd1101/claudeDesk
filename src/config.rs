@@ -63,15 +63,13 @@ pub fn cwd_to_folder_name(cwd: &str) -> String {
 /// 폴더명 → cwd 역치환 (보조, 정확도 낮음)
 pub fn folder_name_to_cwd(name: &str) -> String {
     // Windows 경로 패턴: D--Dev-foo → D:\Dev\foo
-    // 첫 두 글자가 알파벳-이면 드라이브 레터로 시도
-    if name.len() >= 2 {
-        let chars: Vec<char> = name.chars().collect();
-        if chars[0].is_ascii_alphabetic() && chars[1] == '-' && chars[2] == '-' {
-            // D--Dev-claudeDesk → D:\Dev\claudeDesk
-            let drive = chars[0];
-            let rest: String = name[3..].replace('-', "\\");
-            return format!("{}:\\{}", drive, rest);
-        }
+    // 첫 글자가 드라이브 레터이고 "X--" 형태이면 드라이브 경로로 복원
+    let chars: Vec<char> = name.chars().collect();
+    if chars.len() >= 3 && chars[0].is_ascii_alphabetic() && chars[1] == '-' && chars[2] == '-' {
+        // chars[0..3]이 모두 ASCII이므로 byte index 3 == char index 3 (안전)
+        let drive = chars[0];
+        let rest: String = name[3..].replace('-', "\\");
+        return format!("{}:\\{}", drive, rest);
     }
     // 기본: -를 / 로 치환
     name.replace('-', "/")

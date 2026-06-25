@@ -119,7 +119,7 @@ pub fn render_list(f: &mut Frame, state: &AppState, selected: usize) {
         .collect();
 
     // 컬럼 폭 제약
-    let widths = build_widths(show_project, show_msgs, term_width);
+    let widths = build_widths(show_project, show_msgs);
 
     let table = Table::new(rows, widths)
         .header(header)
@@ -151,8 +151,7 @@ fn build_header_cells(show_project: bool, show_msgs: bool) -> Vec<Cell<'static>>
     cells
 }
 
-fn build_widths(show_project: bool, show_msgs: bool, term_width: u16) -> Vec<Constraint> {
-    let _ = term_width;
+fn build_widths(show_project: bool, show_msgs: bool) -> Vec<Constraint> {
     let mut constraints = vec![
         Constraint::Length(2), // 마커
         Constraint::Min(20),   // 제목

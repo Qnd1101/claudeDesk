@@ -78,9 +78,6 @@ fn centered_rect(width: u16, height: u16, area: Rect) -> Rect {
     let popup_width = width.min(area.width);
     let popup_height = height.min(area.height);
 
-    let x = area.x + (area.width.saturating_sub(popup_width)) / 2;
-    let y = area.y + (area.height.saturating_sub(popup_height)) / 2;
-
     // Layout을 이용해 수직/수평 중앙
     let vertical = Layout::default()
         .direction(Direction::Vertical)
@@ -99,8 +96,6 @@ fn centered_rect(width: u16, height: u16, area: Rect) -> Rect {
             Constraint::Min(0),
         ])
         .split(vertical[1]);
-
-    let _ = (x, y); // suppress unused warning
 
     horizontal[1]
 }
