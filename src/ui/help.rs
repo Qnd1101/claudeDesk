@@ -94,6 +94,15 @@ pub fn render_help(f: &mut Frame) {
         ]),
         Line::from(""),
         Line::from(vec![
+            Span::styled("  g    ", Style::default().fg(Color::Blue)),
+            Span::raw("평면/그룹 모드 토글"),
+        ]),
+        Line::from(vec![
+            Span::styled("  Tab  ", Style::default().fg(Color::Blue)),
+            Span::raw("현재 그룹 접기/펼치기 토글"),
+        ]),
+        Line::from(""),
+        Line::from(vec![
             Span::styled("  ?    ", Style::default().fg(Color::Cyan)),
             Span::raw("도움말 토글        "),
             Span::styled("q/Esc", Style::default().fg(Color::Red)),

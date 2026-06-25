@@ -5,6 +5,23 @@
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-06-25
+
+### Added (M2 — 프로젝트 그룹핑 / 포지셔닝)
+- **프로젝트 그룹핑(FR-09):** `g` 평면/그룹 뷰 토글. `cwd`(작업 폴더) 단위로 세션을 묶어 헤더(`▾` 펼침 / `▸` 접힘) + 개수로 표시. 그룹 순서는 **최근 수정 내림차순**, 그룹 내부는 현재 정렬을 따른다.
+- **접기/펼치기:** 그룹 헤더에서 `Tab` 또는 `Enter`로 해당 그룹 접기/펼치기. 접힘 상태는 평면↔그룹 토글 간 유지.
+- **프로젝트 단위 청소:** 그룹 헤더에서 `Space` → 그 그룹의 **현재 보이는(필터된)** 세션을 일괄 선택/해제 → `Del`로 프로젝트 째로 휴지통 이동. "claude를 띄우지 않고 프로젝트 단위로 정리"를 직접 지원.
+- 검색(FR-05)·정렬(FR-07)·삭제(FR-04)와 합성: 그룹 뷰는 원본 불변 view-layer(`display_rows`)로 구현, 헤더 개수는 검색 필터 결과와 일치하고 빈 그룹은 숨김.
+
+### Changed (포지셔닝 재정의)
+- README·PRD를 "resume 보조 도구" → **"세션 하우스키핑 전용 도구(`claude`를 실행하지 않고 관리·정리·삭제)"**로 재정의. `claude --resume` 내장 피커와 겹치는 검색/정렬/RAM을 헤드라인에서 내리고, 안전 삭제·휴지통·**프로젝트 그룹핑**을 핵심 가치로 승격. (PRD v2.2.0)
+
+### Fixed
+- 그룹 헤더 `Space` 해제 시 검색에 가려진(hidden) 세션의 선택까지 풀리던 비대칭(BUG-01) 수정 — 선택·해제 모두 **보이는 세션 기준**으로 대칭화. 토글 로직을 `AppState::toggle_group_visible`로 분리해 회귀 테스트 4종 추가.
+
+### Tests
+- 그룹 뷰(`display_rows`) 유닛 테스트 5종 + 그룹 선택 토글 4종 추가. 총 77 테스트(46 유닛 + 16 parser + 15 trash) 통과, 원본 SHA 불변 유지.
+
 ## [0.4.0] - 2026-06-25
 
 ### Added (M2 — 안전 삭제 / 휴지통)
@@ -53,7 +70,8 @@
 ### Note
 - 코드 구현은 M0(기술 검증 스파이크)부터. 본 릴리스는 **기획·워크플로우 베이스라인**이다.
 
-[Unreleased]: https://github.com/Qnd1101/claudeDesk/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/Qnd1101/claudeDesk/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/Qnd1101/claudeDesk/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/Qnd1101/claudeDesk/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/Qnd1101/claudeDesk/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/Qnd1101/claudeDesk/compare/v0.1.0...v0.2.0

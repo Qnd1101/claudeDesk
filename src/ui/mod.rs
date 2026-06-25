@@ -16,7 +16,7 @@ use std::collections::HashSet;
 use std::io::stdout;
 use std::time::Duration;
 
-use crate::service::{exec_resume, resume_session, AppState, ResumeResult};
+use crate::service::{exec_resume, resume_session, AppState, DisplayRow, ResumeResult};
 use crate::trash::{purge_sessions, restore_sessions, soft_delete_sessions, TrashIndex};
 use help::render_help;
 use list::render_list;
@@ -278,7 +278,7 @@ impl App {
                 }
             }
             KeyCode::Down | KeyCode::Char('j') => {
-                let count = self.state.filtered_indices().len();
+                let count = self.state.display_rows().len();
                 if count > 0 && self.cursor < count - 1 {
                     self.cursor += 1;
                 }
@@ -287,7 +287,7 @@ impl App {
                 self.cursor = 0;
             }
             KeyCode::End => {
-                let count = self.state.filtered_indices().len();
+                let count = self.state.display_rows().len();
                 if count > 0 {
                     self.cursor = count - 1;
                 }
@@ -296,7 +296,7 @@ impl App {
                 self.cursor = self.cursor.saturating_sub(10);
             }
             KeyCode::PageDown => {
-                let max = self.state.filtered_indices().len().saturating_sub(1);
+                let max = self.state.display_rows().len().saturating_sub(1);
                 self.cursor = (self.cursor + 10).min(max);
             }
 
@@ -307,6 +307,18 @@ impl App {
 
             // ── M2: 다중선택 (Space, FR-04) ─────────────────────────────
             KeyCode::Char(' ') => {
+                if self.state.grouped {
+                    let rows = self.state.display_rows();
+                    if let Some(row) = rows.get(self.cursor) {
+                        match row.clone() {
+                            DisplayRow::Header { cwd, .. } => {
+                                self.toggle_group_selection(&cwd);
+                                return Ok(false);
+                            }
+                            DisplayRow::Session(_) => {}
+                        }
+                    }
+                }
                 if let Some(session) = self.current_session() {
                     let sid = session.session_id.clone();
                     if self.state.selected_ids.contains(&sid) {
@@ -354,8 +366,47 @@ impl App {
                 self.open_trash();
             }
 
+            // ── FR-09: 그룹 모드 토글 (g) ────────────────────────────────
+            KeyCode::Char('g') => {
+                self.state.grouped = !self.state.grouped;
+                self.cursor = 0;
+            }
+
+            // ── FR-09: 그룹 접기/펼치기 (Tab) ────────────────────────────
+            KeyCode::Tab => {
+                if self.state.grouped {
+                    let cwd_opt = self.current_group_cwd();
+                    if let Some(cwd) = cwd_opt {
+                        if self.state.collapsed_projects.contains(&cwd) {
+                            self.state.collapsed_projects.remove(&cwd);
+                        } else {
+                            self.state.collapsed_projects.insert(cwd);
+                        }
+                        self.clamp_cursor();
+                    }
+                }
+            }
+
             // Resume
             KeyCode::Enter => {
+                if self.state.grouped {
+                    let rows = self.state.display_rows();
+                    if let Some(row) = rows.get(self.cursor) {
+                        match row {
+                            DisplayRow::Header { cwd, .. } => {
+                                let cwd = cwd.clone();
+                                if self.state.collapsed_projects.contains(&cwd) {
+                                    self.state.collapsed_projects.remove(&cwd);
+                                } else {
+                                    self.state.collapsed_projects.insert(cwd);
+                                }
+                                self.clamp_cursor();
+                                return Ok(false);
+                            }
+                            DisplayRow::Session(_) => {}
+                        }
+                    }
+                }
                 if let Some(session) = self.current_session() {
                     match resume_session(session) {
                         ResumeResult::Ready { cwd, session_id } => {
@@ -418,7 +469,7 @@ impl App {
                 }
             }
             KeyCode::Down | KeyCode::Char('j') => {
-                let count = self.state.filtered_indices().len();
+                let count = self.state.display_rows().len();
                 if count > 0 && self.cursor < count - 1 {
                     self.cursor += 1;
                 }
@@ -632,7 +683,7 @@ impl App {
         }
 
         // 커서 보정
-        let max = self.state.filtered_indices().len().saturating_sub(1);
+        let max = self.state.display_rows().len().saturating_sub(1);
         if self.cursor > max {
             self.cursor = max;
         }
@@ -776,11 +827,43 @@ impl App {
         self.cursor = 0;
     }
 
-    /// 현재 커서가 가리키는 세션 참조 (필터 인덱스 경유)
+    /// 현재 커서가 가리키는 세션 참조 (display_rows 경유)
     fn current_session(&self) -> Option<&crate::domain::Session> {
-        let indices = self.state.filtered_indices();
-        let real_idx = indices.get(self.cursor)?;
-        self.state.sessions.get(*real_idx)
+        let rows = self.state.display_rows();
+        match rows.get(self.cursor)? {
+            DisplayRow::Session(real_idx) => self.state.sessions.get(*real_idx),
+            DisplayRow::Header { .. } => None,
+        }
+    }
+
+    /// 현재 커서가 속한 그룹의 cwd 반환
+    fn current_group_cwd(&self) -> Option<String> {
+        let rows = self.state.display_rows();
+        match rows.get(self.cursor)? {
+            DisplayRow::Header { cwd, .. } => Some(cwd.clone()),
+            DisplayRow::Session(real_idx) => {
+                let session = self.state.sessions.get(*real_idx)?;
+                Some(session.cwd.clone())
+            }
+        }
+    }
+
+    /// 커서를 display_rows 범위 내로 클램프
+    fn clamp_cursor(&mut self) {
+        let len = self.state.display_rows().len();
+        if len == 0 {
+            self.cursor = 0;
+        } else if self.cursor >= len {
+            self.cursor = len - 1;
+        }
+    }
+
+    /// 헤더 위에서 Space: 현재 화면에 보이는(필터된) 그룹 세션만 일괄 선택/해제.
+    /// 검색으로 숨겨진 세션의 selected 상태는 건드리지 않는다 (BUG-01 수정).
+    /// 핵심 로직은 `AppState::toggle_group_visible`에 위임해 단위 테스트 가능.
+    fn toggle_group_selection(&mut self, cwd: &str) {
+        let visible_ids = self.state.visible_group_ids(cwd);
+        self.state.toggle_group_visible(&visible_ids);
     }
 
     /// 현재 휴지통 커서가 가리키는 항목 참조
