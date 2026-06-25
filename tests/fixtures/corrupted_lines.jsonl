@@ -1,0 +1,5 @@
+{"type":"agent-setting","sessionId":"33333333-3333-3333-3333-333333333333"}
+THIS IS NOT JSON AND SHOULD BE SKIPPED
+{"type":"user","sessionId":"33333333-3333-3333-3333-333333333333","timestamp":"2026-06-25T03:00:00Z","cwd":"/home/synth/corrupt","message":{"role":"user","content":"손상 줄 스킵 후 정상 파싱"},"uuid":"dd01","parentUuid":null}
+{broken json line without closing brace
+{"type":"assistant","sessionId":"33333333-3333-3333-3333-333333333333","timestamp":"2026-06-25T03:00:01Z","message":{"role":"assistant","content":"정상 응답"}}
