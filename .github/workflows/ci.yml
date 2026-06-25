@@ -13,6 +13,7 @@ on:
 
 permissions:
   contents: read
+  pull-requests: write   # gitleaks-action이 PR 스캔 시 API 접근(요약/코멘트)에 필요
 
 concurrency:
   group: ci-${{ github.ref }}
