@@ -8,7 +8,7 @@ use ratatui::{
 use std::collections::HashSet;
 use unicode_width::UnicodeWidthStr;
 
-use crate::service::AppState;
+use crate::service::{AppState, DisplayRow};
 
 use super::time::relative_time;
 
@@ -176,7 +176,9 @@ pub fn render_list(
 
     // 컬럼 폭 반응형
     let term_width = area.width;
-    let (show_project, show_msgs) = if term_width >= 80 {
+    let (show_project, show_msgs) = if state.grouped {
+        (false, term_width >= 80)
+    } else if term_width >= 80 {
         (true, true)
     } else if term_width >= 60 {
         (true, false)
@@ -190,60 +192,101 @@ pub fn render_list(
         .style(Style::default().add_modifier(Modifier::BOLD))
         .bottom_margin(0);
 
-    // 데이터 행 (필터된 인덱스로만)
-    let rows: Vec<Row> = indices
+    // 데이터 행 (display_rows 기반)
+    let display_rows = state.display_rows();
+
+    let rows: Vec<Row> = display_rows
         .iter()
         .enumerate()
-        .map(|(display_i, &real_i)| {
-            let session = &state.sessions[real_i];
-            let is_sel_cursor = display_i == cursor;
-            let is_checked = selected_ids.contains(&session.session_id);
+        .map(|(display_i, row)| {
+            let is_cursor = display_i == cursor;
+            match row {
+                DisplayRow::Header {
+                    project_name,
+                    count,
+                    collapsed,
+                    ..
+                } => {
+                    let arrow = if *collapsed { "▸" } else { "▾" };
+                    let title_text = format!("{} {}  ({})", arrow, project_name, count);
+                    let style = if is_cursor {
+                        Style::default()
+                            .fg(Color::Cyan)
+                            .add_modifier(Modifier::BOLD)
+                            .add_modifier(Modifier::REVERSED)
+                    } else {
+                        Style::default()
+                            .fg(Color::Cyan)
+                            .add_modifier(Modifier::BOLD)
+                    };
+                    let mut cells = vec![Cell::from(""), Cell::from(title_text)];
+                    if show_project {
+                        cells.push(Cell::from(""));
+                    }
+                    cells.push(Cell::from(""));
+                    if show_msgs {
+                        cells.push(Cell::from(""));
+                    }
+                    Row::new(cells).style(style)
+                }
+                DisplayRow::Session(real_i) => {
+                    let session = &state.sessions[*real_i];
+                    let is_checked = selected_ids.contains(&session.session_id);
 
-            // 마커: ▸ 커서, ● 활성, ✓ 다중선택
-            let marker = match (is_sel_cursor, is_checked, session.is_active) {
-                (true, true, _) => "▸✓",
-                (true, false, true) => "▸●",
-                (true, false, false) => "▸ ",
-                (false, true, _) => " ✓",
-                (false, false, true) => " ●",
-                (false, false, false) => "  ",
-            };
+                    let marker = match (is_cursor, is_checked, session.is_active) {
+                        (true, true, _) => "▸✓",
+                        (true, false, true) => "▸●",
+                        (true, false, false) => "▸ ",
+                        (false, true, _) => " ✓",
+                        (false, false, true) => " ●",
+                        (false, false, false) => "  ",
+                    };
 
-            let title = safe_truncate(&session.title, 40);
-            let modified = relative_time(&session.modified);
+                    let title_text = if state.grouped {
+                        format!("  {}", safe_truncate(&session.title, 38))
+                    } else {
+                        safe_truncate(&session.title, 40)
+                    };
 
-            let mut cells = vec![Cell::from(marker), Cell::from(title)];
+                    let modified = relative_time(&session.modified);
 
-            if show_project {
-                let project = safe_truncate(session.project_name(), 20);
-                cells.push(Cell::from(project));
+                    let mut cells = vec![Cell::from(marker), Cell::from(title_text)];
+
+                    if show_project {
+                        let project = safe_truncate(session.project_name(), 20);
+                        cells.push(Cell::from(project));
+                    }
+
+                    cells.push(Cell::from(modified));
+
+                    if show_msgs {
+                        cells.push(Cell::from(session.msg_count.to_string()));
+                    }
+
+                    let style = if is_cursor {
+                        Style::default().add_modifier(Modifier::REVERSED)
+                    } else if is_checked {
+                        Style::default().fg(Color::Cyan)
+                    } else if session.is_active {
+                        Style::default().fg(Color::Green)
+                    } else {
+                        Style::default()
+                    };
+
+                    Row::new(cells).style(style)
+                }
             }
-
-            cells.push(Cell::from(modified));
-
-            if show_msgs {
-                cells.push(Cell::from(session.msg_count.to_string()));
-            }
-
-            let style = if is_sel_cursor {
-                Style::default().add_modifier(Modifier::REVERSED)
-            } else if is_checked {
-                Style::default().fg(Color::Cyan)
-            } else if session.is_active {
-                Style::default().fg(Color::Green)
-            } else {
-                Style::default()
-            };
-
-            Row::new(cells).style(style)
         })
         .collect();
 
     // 컬럼 폭 제약
     let widths = build_widths(show_project, show_msgs);
 
+    let session_count = indices.len();
     let title_str = if search_mode {
-        format!(" Sessions ({}/{}) ", indices.len(), state.sessions.len())
+        format!(" Sessions ({}/{}) ", session_count, state.sessions.len())
+    } else if state.grouped {
+        format!(" Sessions ({}) [그룹] ", session_count)
     } else {
         format!(" Sessions ({}) ", state.sessions.len())
     };
@@ -354,10 +397,12 @@ fn render_statusbar(
             Style::default().fg(Color::Cyan),
         ));
     } else {
-        spans.push(Span::styled(
-            " ↑↓/jk 이동  Enter 이어하기  / 검색  s 정렬  Space 선택  a 전체선택  Del 삭제  T 휴지통  ? 도움말  q 종료",
-            Style::default().fg(Color::DarkGray),
-        ));
+        let mut hint = " ↑↓/jk 이동  Enter 이어하기  / 검색  s 정렬  g 그룹".to_string();
+        if state.grouped {
+            hint.push_str("  Tab 접기/펼치기");
+        }
+        hint.push_str("  Space 선택  a 전체선택  Del 삭제  T 휴지통  ? 도움말  q 종료");
+        spans.push(Span::styled(hint, Style::default().fg(Color::DarkGray)));
     }
 
     let status = Paragraph::new(Line::from(spans));

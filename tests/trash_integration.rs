@@ -508,6 +508,8 @@ fn test_sort_and_filter_regression() {
         sort: SortState::default(),
         search_query: Some("gamma".to_string()),
         selected_ids: HashSet::new(),
+        grouped: false,
+        collapsed_projects: HashSet::new(),
     };
     let idx = state.filtered_indices();
     assert_eq!(idx.len(), 1, "검색 결과가 1개여야 함");

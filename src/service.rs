@@ -181,6 +181,20 @@ pub struct ScanStats {
     pub skipped_files: usize,
 }
 
+/// 그룹 모드 표시 행 (FR-09)
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DisplayRow {
+    /// 프로젝트 그룹 헤더
+    Header {
+        cwd: String,
+        project_name: String,
+        count: usize,
+        collapsed: bool,
+    },
+    /// 세션 행 (sessions Vec 내 실제 인덱스)
+    Session(usize),
+}
+
 /// 앱 전체 상태
 pub struct AppState {
     pub sessions: Vec<Session>,
@@ -192,6 +206,10 @@ pub struct AppState {
     pub search_query: Option<String>,
     /// 다중선택된 session_id 집합 (FR-04)
     pub selected_ids: std::collections::HashSet<String>,
+    /// 그룹 모드 활성 여부 (FR-09, 기본 false)
+    pub grouped: bool,
+    /// 접힌 프로젝트 cwd 집합 (FR-09)
+    pub collapsed_projects: std::collections::HashSet<String>,
 }
 
 impl AppState {
@@ -205,7 +223,104 @@ impl AppState {
             sort,
             search_query: None,
             selected_ids: std::collections::HashSet::new(),
+            grouped: false,
+            collapsed_projects: std::collections::HashSet::new(),
         })
+    }
+
+    /// 현재 모드(평면/그룹)에 따른 표시 행 목록 반환 (FR-09)
+    pub fn display_rows(&self) -> Vec<DisplayRow> {
+        use crate::domain::project_name_of;
+
+        let indices = self.filtered_indices();
+
+        if !self.grouped {
+            return indices.into_iter().map(DisplayRow::Session).collect();
+        }
+
+        let mut group_order: Vec<String> = Vec::new();
+        let mut groups: std::collections::HashMap<String, (std::time::SystemTime, Vec<usize>)> =
+            std::collections::HashMap::new();
+
+        for &idx in &indices {
+            let session = &self.sessions[idx];
+            let cwd = session.cwd.clone();
+            if !groups.contains_key(&cwd) {
+                group_order.push(cwd.clone());
+                groups.insert(cwd.clone(), (session.modified, vec![idx]));
+            } else {
+                let entry = groups.get_mut(&cwd).unwrap();
+                if session.modified > entry.0 {
+                    entry.0 = session.modified;
+                }
+                entry.1.push(idx);
+            }
+        }
+
+        group_order.sort_by(|a, b| {
+            let ta = groups[a].0;
+            let tb = groups[b].0;
+            tb.cmp(&ta)
+        });
+
+        let mut rows = Vec::new();
+        for cwd in &group_order {
+            let (_, session_indices) = &groups[cwd];
+            let count = session_indices.len();
+            let collapsed = self.collapsed_projects.contains(cwd);
+            let pname = project_name_of(cwd).to_string();
+
+            rows.push(DisplayRow::Header {
+                cwd: cwd.clone(),
+                project_name: pname,
+                count,
+                collapsed,
+            });
+
+            if !collapsed {
+                for &idx in session_indices {
+                    rows.push(DisplayRow::Session(idx));
+                }
+            }
+        }
+
+        rows
+    }
+
+    /// 헤더 Space 키 동작 핵심 로직: visible_ids(필터된 그룹 세션 id 슬라이스)를
+    /// 기준으로 selected_ids를 대칭 토글한다.
+    ///
+    /// - 전부 선택돼 있으면 visible_ids만 해제 (숨겨진 세션은 건드리지 않음)
+    /// - 아니면 visible_ids 전체 선택
+    ///
+    /// UI 레이어(`toggle_group_selection`)와 테스트가 모두 이 메서드를 공유한다 (BUG-01).
+    pub fn toggle_group_visible(&mut self, visible_ids: &[String]) {
+        if visible_ids.is_empty() {
+            return;
+        }
+        let all_selected = visible_ids
+            .iter()
+            .all(|sid| self.selected_ids.contains(sid));
+
+        if all_selected {
+            for sid in visible_ids {
+                self.selected_ids.remove(sid);
+            }
+        } else {
+            for sid in visible_ids {
+                self.selected_ids.insert(sid.clone());
+            }
+        }
+    }
+
+    /// 지정 cwd 그룹에서 현재 검색 필터에 보이는 세션 id 목록 반환 (BUG-01 테스트 지원)
+    pub fn visible_group_ids(&self, cwd: &str) -> Vec<String> {
+        self.filtered_indices()
+            .iter()
+            .filter_map(|&i| self.sessions.get(i))
+            .filter(|s| s.cwd == cwd)
+            .map(|s| s.session_id.clone())
+            .collect()
     }
 
     /// 현재 검색 쿼리로 필터된 세션 인덱스 목록 반환
@@ -444,6 +559,8 @@ mod tests {
             sort: SortState::default(),
             search_query: None,
             selected_ids: std::collections::HashSet::new(),
+            grouped: false,
+            collapsed_projects: std::collections::HashSet::new(),
         };
         let idx = state.filtered_indices();
         assert_eq!(idx, vec![0, 1]);
@@ -462,6 +579,8 @@ mod tests {
             sort: SortState::default(),
             search_query: Some("docker".to_string()),
             selected_ids: std::collections::HashSet::new(),
+            grouped: false,
+            collapsed_projects: std::collections::HashSet::new(),
         };
         let idx = state.filtered_indices();
         assert_eq!(idx, vec![0, 2]);
@@ -479,6 +598,8 @@ mod tests {
             sort: SortState::default(),
             search_query: Some("rust".to_string()),
             selected_ids: std::collections::HashSet::new(),
+            grouped: false,
+            collapsed_projects: std::collections::HashSet::new(),
         };
         let idx = state.filtered_indices();
         assert_eq!(idx, vec![0]);
@@ -490,6 +611,173 @@ mod tests {
         assert_eq!(s.display(), "Modified ↓");
         let s2 = s.toggle_dir();
         assert_eq!(s2.display(), "Modified ↑");
+    }
+
+    fn make_session_with_cwd(
+        title: &str,
+        cwd: &str,
+        modified_secs_ago: u64,
+        msg_count: usize,
+    ) -> Session {
+        let now = SystemTime::now();
+        let modified = now - Duration::from_secs(modified_secs_ago);
+        let created = modified;
+        let search_text = build_search_text(title, None, cwd);
+        Session {
+            session_id: title.to_string(),
+            title: title.to_string(),
+            cwd: cwd.to_string(),
+            created,
+            modified,
+            msg_count,
+            is_active: false,
+            path: PathBuf::from(cwd),
+            skipped_lines: 0,
+            search_text,
+        }
+    }
+
+    #[test]
+    fn test_display_rows_flat_mode() {
+        let state = AppState {
+            sessions: vec![make_session("A", 100, 1), make_session("B", 200, 2)],
+            stats: ScanStats::default(),
+            projects_root: PathBuf::from("/tmp"),
+            sort: SortState::default(),
+            search_query: None,
+            selected_ids: std::collections::HashSet::new(),
+            grouped: false,
+            collapsed_projects: std::collections::HashSet::new(),
+        };
+        let rows = state.display_rows();
+        assert_eq!(rows, vec![DisplayRow::Session(0), DisplayRow::Session(1)]);
+    }
+
+    #[test]
+    fn test_display_rows_grouped_headers_before_sessions() {
+        let state = AppState {
+            sessions: vec![
+                make_session_with_cwd("S1", "/proj/alpha", 100, 1),
+                make_session_with_cwd("S2", "/proj/beta", 200, 2),
+            ],
+            stats: ScanStats::default(),
+            projects_root: PathBuf::from("/tmp"),
+            sort: SortState::default(),
+            search_query: None,
+            selected_ids: std::collections::HashSet::new(),
+            grouped: true,
+            collapsed_projects: std::collections::HashSet::new(),
+        };
+        let rows = state.display_rows();
+        // alpha (100 secs ago) is more recent -> alpha first
+        assert_eq!(rows.len(), 4);
+        match &rows[0] {
+            DisplayRow::Header { project_name, .. } => assert_eq!(project_name, "alpha"),
+            _ => panic!("Expected Header for alpha first"),
+        }
+        assert_eq!(rows[1], DisplayRow::Session(0));
+        match &rows[2] {
+            DisplayRow::Header { project_name, .. } => assert_eq!(project_name, "beta"),
+            _ => panic!("Expected Header for beta second"),
+        }
+        assert_eq!(rows[3], DisplayRow::Session(1));
+    }
+
+    #[test]
+    fn test_display_rows_collapsed_hides_sessions() {
+        let mut collapsed = std::collections::HashSet::new();
+        collapsed.insert("/proj/alpha".to_string());
+        let state = AppState {
+            sessions: vec![
+                make_session_with_cwd("S1", "/proj/alpha", 100, 1),
+                make_session_with_cwd("S2", "/proj/beta", 200, 2),
+            ],
+            stats: ScanStats::default(),
+            projects_root: PathBuf::from("/tmp"),
+            sort: SortState::default(),
+            search_query: None,
+            selected_ids: std::collections::HashSet::new(),
+            grouped: true,
+            collapsed_projects: collapsed,
+        };
+        let rows = state.display_rows();
+        assert_eq!(rows.len(), 3);
+        match &rows[0] {
+            DisplayRow::Header {
+                project_name,
+                collapsed,
+                ..
+            } => {
+                assert_eq!(project_name, "alpha");
+                assert!(*collapsed);
+            }
+            _ => panic!("Expected Header for alpha"),
+        }
+        match &rows[1] {
+            DisplayRow::Header {
+                project_name,
+                collapsed,
+                ..
+            } => {
+                assert_eq!(project_name, "beta");
+                assert!(!*collapsed);
+            }
+            _ => panic!("Expected Header for beta"),
+        }
+        assert_eq!(rows[2], DisplayRow::Session(1));
+    }
+
+    #[test]
+    fn test_display_rows_group_order_by_recent_modified() {
+        let state = AppState {
+            sessions: vec![
+                make_session_with_cwd("S1", "/proj/alpha", 50, 1),
+                make_session_with_cwd("S2", "/proj/beta", 300, 2),
+            ],
+            stats: ScanStats::default(),
+            projects_root: PathBuf::from("/tmp"),
+            sort: SortState::default(),
+            search_query: None,
+            selected_ids: std::collections::HashSet::new(),
+            grouped: true,
+            collapsed_projects: std::collections::HashSet::new(),
+        };
+        let rows = state.display_rows();
+        match &rows[0] {
+            DisplayRow::Header { project_name, .. } => assert_eq!(project_name, "alpha"),
+            _ => panic!("Expected Header"),
+        }
+    }
+
+    #[test]
+    fn test_display_rows_grouped_with_search() {
+        let state = AppState {
+            sessions: vec![
+                make_session_with_cwd("Docker setup", "/proj/alpha", 100, 1),
+                make_session_with_cwd("Python debug", "/proj/beta", 200, 2),
+            ],
+            stats: ScanStats::default(),
+            projects_root: PathBuf::from("/tmp"),
+            sort: SortState::default(),
+            search_query: Some("docker".to_string()),
+            selected_ids: std::collections::HashSet::new(),
+            grouped: true,
+            collapsed_projects: std::collections::HashSet::new(),
+        };
+        let rows = state.display_rows();
+        assert_eq!(rows.len(), 2);
+        match &rows[0] {
+            DisplayRow::Header {
+                project_name,
+                count,
+                ..
+            } => {
+                assert_eq!(project_name, "alpha");
+                assert_eq!(*count, 1);
+            }
+            _ => panic!("Expected Header"),
+        }
+        assert_eq!(rows[1], DisplayRow::Session(0));
     }
 
     /// title이 80자 절단됐을 때 절단 전 전체 텍스트로 검색 가능한지 검증 ([1]+[6])
@@ -509,12 +797,148 @@ mod tests {
             sort: SortState::default(),
             search_query: Some("뒷부분키워드".to_string()),
             selected_ids: std::collections::HashSet::new(),
+            grouped: false,
+            collapsed_projects: std::collections::HashSet::new(),
         };
         let idx = state.filtered_indices();
         assert_eq!(
             idx,
             vec![0],
             "80자 절단 이후 텍스트로 검색 시 매칭되지 않음 — search_text에 first_user_raw 미포함"
+        );
+    }
+
+    // ── BUG-01 회귀 테스트: toggle_group_visible 대칭성 ───────────────────────
+
+    /// 헬퍼: 주어진 세션 id들이 모두 selected_ids에 포함돼 있는 상태의 AppState 생성.
+    fn state_with_selected(
+        sessions: Vec<Session>,
+        selected: &[&str],
+        search_query: Option<String>,
+    ) -> AppState {
+        let mut selected_ids = std::collections::HashSet::new();
+        for &sid in selected {
+            selected_ids.insert(sid.to_string());
+        }
+        AppState {
+            sessions,
+            stats: ScanStats::default(),
+            projects_root: PathBuf::from("/tmp"),
+            sort: SortState::default(),
+            search_query,
+            selected_ids,
+            grouped: true,
+            collapsed_projects: std::collections::HashSet::new(),
+        }
+    }
+
+    /// BUG-01 시나리오 1: 검색으로 그룹의 일부만 visible할 때,
+    /// 헤더 토글이 visible 세션만 선택하고 hidden 세션의 selected 상태는 보존됨.
+    #[test]
+    fn test_toggle_group_visible_preserves_hidden_selected() {
+        // alpha 그룹: "Docker A"(visible, 검색 매칭), "Python B"(hidden, 검색 미매칭)
+        // Python B는 이미 selected 상태 — 토글 후에도 유지돼야 한다.
+        let sessions = vec![
+            make_session_with_cwd("Docker A", "/proj/alpha", 100, 1),
+            make_session_with_cwd("Python B", "/proj/alpha", 200, 2),
+        ];
+        let mut state = state_with_selected(
+            sessions,
+            &["Python B"], // hidden 세션 미리 선택
+            Some("docker".to_string()),
+        );
+
+        let visible = state.visible_group_ids("/proj/alpha");
+        assert_eq!(
+            visible,
+            vec!["Docker A"],
+            "검색 필터 후 visible은 Docker A만"
+        );
+
+        // 헤더 Space → visible(Docker A)만 선택돼야 함
+        state.toggle_group_visible(&visible);
+        assert!(
+            state.selected_ids.contains("Docker A"),
+            "Docker A가 선택돼야 함"
+        );
+        assert!(
+            state.selected_ids.contains("Python B"),
+            "숨겨진 Python B의 selected 상태가 보존돼야 함 (BUG-01)"
+        );
+    }
+
+    /// BUG-01 시나리오 2: 전부 visible + 전부 선택 상태에서 토글 → visible 전부 해제.
+    /// 단, 다른 그룹의 selected 상태는 건드리지 않음.
+    #[test]
+    fn test_toggle_group_visible_deselects_all_visible() {
+        let sessions = vec![
+            make_session_with_cwd("S1", "/proj/alpha", 100, 1),
+            make_session_with_cwd("S2", "/proj/alpha", 200, 2),
+            make_session_with_cwd("S3", "/proj/beta", 300, 3),
+        ];
+        // alpha 둘 다 선택, beta도 선택
+        let mut state = state_with_selected(sessions, &["S1", "S2", "S3"], None);
+
+        let visible = state.visible_group_ids("/proj/alpha");
+        assert_eq!(visible.len(), 2);
+
+        // 전부 선택 상태 → 해제
+        state.toggle_group_visible(&visible);
+        assert!(!state.selected_ids.contains("S1"), "S1 해제돼야 함");
+        assert!(!state.selected_ids.contains("S2"), "S2 해제돼야 함");
+        assert!(
+            state.selected_ids.contains("S3"),
+            "다른 그룹 S3의 selected 상태는 유지돼야 함"
+        );
+    }
+
+    /// BUG-01 시나리오 3: 일부만 선택 상태에서 토글 → visible 전부 선택 (기존 선택 유지).
+    #[test]
+    fn test_toggle_group_visible_selects_all_when_partial() {
+        let sessions = vec![
+            make_session_with_cwd("S1", "/proj/alpha", 100, 1),
+            make_session_with_cwd("S2", "/proj/alpha", 200, 2),
+        ];
+        // S1만 선택된 부분 선택 상태
+        let mut state = state_with_selected(sessions, &["S1"], None);
+
+        let visible = state.visible_group_ids("/proj/alpha");
+        assert_eq!(visible.len(), 2);
+
+        // 일부 선택 → 전부 선택
+        state.toggle_group_visible(&visible);
+        assert!(state.selected_ids.contains("S1"), "S1 선택 유지");
+        assert!(state.selected_ids.contains("S2"), "S2도 새로 선택됨");
+    }
+
+    /// BUG-01 해제 대칭성: 검색 중 visible 세션만 해제하고 hidden은 보존.
+    /// (구 버전은 group_ids 전체를 해제해 hidden 세션도 풀렸음)
+    #[test]
+    fn test_toggle_group_visible_deselect_only_visible_not_hidden() {
+        // alpha: "Docker A"(visible), "Python B"(hidden). 둘 다 선택.
+        let sessions = vec![
+            make_session_with_cwd("Docker A", "/proj/alpha", 100, 1),
+            make_session_with_cwd("Python B", "/proj/alpha", 200, 2),
+        ];
+        let mut state = state_with_selected(
+            sessions,
+            &["Docker A", "Python B"],
+            Some("docker".to_string()), // Python B는 검색에 안 걸림
+        );
+
+        let visible = state.visible_group_ids("/proj/alpha");
+        assert_eq!(visible, vec!["Docker A"]);
+
+        // visible인 Docker A만 선택된 상태 → 해제 (all_selected=true, visible=["Docker A"])
+        state.toggle_group_visible(&visible);
+
+        assert!(
+            !state.selected_ids.contains("Docker A"),
+            "Docker A는 해제돼야 함"
+        );
+        assert!(
+            state.selected_ids.contains("Python B"),
+            "숨겨진 Python B는 구 버전처럼 같이 해제되면 안 됨 (BUG-01 핵심)"
         );
     }
 }

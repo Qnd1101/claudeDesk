@@ -1,7 +1,11 @@
 # claudeDesk
 
-> Claude Code의 로컬 세션(채팅방)을 **초경량 RAM**으로 관리하는 크로스플랫폼 **TUI** 툴.
-> 세션을 한눈에 보고, 골라서 **바로 이어하기(resume)**. 무거운 GUI 없이 단일 바이너리로.
+> Claude Code 세션을 **`claude`를 실행하지 않고** 관리·정리·삭제하는 standalone **세션 하우스키핑** 도구.
+> 안 쓰는 대화를 안전하게 치우고, 프로젝트별로 묶어 보고, 필요하면 그 자리에서 이어하기까지 — 단일 바이너리 TUI.
+
+**왜 별도 도구인가?** `claude --resume`의 내장 피커는 "이어할 세션 고르기"까지만 한다.
+claudeDesk는 그 반대편 — **세션을 띄우지 않고 청소하는 일**(안전 삭제·휴지통 복구·프로젝트 그룹핑·메타 점검)을 전담한다.
+수백 개로 쌓인 `~/.claude/projects/`를 `claude`를 켜지 않고 정리하는 게 핵심 가치다.
 
 [![CI (Gate A)](https://github.com/Qnd1101/claudeDesk/actions/workflows/ci.yml/badge.svg)](https://github.com/Qnd1101/claudeDesk/actions/workflows/ci.yml)
 [![Release (CD)](https://github.com/Qnd1101/claudeDesk/actions/workflows/release.yml/badge.svg)](https://github.com/Qnd1101/claudeDesk/actions/workflows/release.yml)
@@ -56,6 +60,17 @@ cargo build --release
 ./target/release/claudedesk        # Windows: .\target\release\claudedesk.exe
 ```
 
+## 핵심 기능 (Housekeeping)
+
+`claude`를 켜지 않고 세션을 정리한다 — 이게 claudeDesk의 존재 이유다.
+
+- 🗑️ **안전 삭제 · 휴지통(FR-04/11):** 다중 선택 → 휴지통으로 **이동만**(원본 내용 불변). 복구·영구삭제는 명시적 2단계 확인. 자동 삭제 없음.
+- 🗂️ **프로젝트 그룹핑(FR-09):** 수백 개 세션을 작업 폴더(`cwd`)별로 접고 펴서 한눈에. 프로젝트 단위로 청소.
+- 🔎 **검색 · 정렬(FR-05/07):** 제목·프로젝트 부분일치 필터, 수정/생성/제목/메시지수 정렬 — 정리할 대상을 빠르게 추린다.
+- ↩️ **이어하기(FR-03):** 치우다 발견한 세션은 그 자리에서 `claude --resume`로 복귀(선택 기능).
+
+> 원본 `*.jsonl`은 **절대 수정하지 않는다**(읽기 전용·이동만). CI가 SHA 불변을 강제한다.
+
 ## 사용법 (Usage)
 
 그냥 실행하면 `~/.claude/projects/`의 세션을 자동으로 스캔해 목록을 띄웁니다.
@@ -105,9 +120,12 @@ claudedesk
 
 ## 로드맵
 
-- ✅ **M1 (현재):** 세션 스캔 · 목록 · 이어하기 · 에러 가시성 · 도움말
-- ⬜ **M2:** 검색 · 정렬 · 안전 삭제(휴지통) · 프로젝트 그룹핑
+- ✅ **M1:** 세션 스캔 · 목록 · 이어하기 · 에러 가시성 · 도움말
+- 🚧 **M2 (현재):** 검색 · 정렬 ✅ · 안전 삭제(휴지통) ✅ · **프로젝트 그룹핑** 🚧
 - ⬜ **M3:** 별칭 · 미리보기 · 설정 화면
+
+> **포지셔닝:** claudeDesk는 `claude --resume` 내장 피커의 대체재가 아니라, 그것이 다루지 않는
+> **세션 하우스키핑**(띄우지 않고 정리·삭제·그룹핑) 전담 도구다. resume는 보조 기능이다.
 
 자세한 내용은 [docs/](docs/README.md) — PRD, Task 분할, UI/UX 설계, 개발 가이드.
 
