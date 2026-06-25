@@ -5,6 +5,7 @@ use ratatui::{
     widgets::{Block, Borders, Cell, Paragraph, Row, Table, TableState},
     Frame,
 };
+use std::collections::HashSet;
 use unicode_width::UnicodeWidthStr;
 
 use crate::service::AppState;
@@ -12,8 +13,17 @@ use crate::service::AppState;
 use super::time::relative_time;
 
 /// 메인 리스트 렌더.
-/// `search_mode`: true이면 검색 입력바 추가 렌더.
-pub fn render_list(f: &mut Frame, state: &AppState, cursor: usize, search_mode: bool) {
+/// - `search_mode`: true이면 검색 입력바 추가 렌더.
+/// - `selected_ids`: 다중선택된 session_id 집합 (✓ 마커 표시용).
+/// - `status_message`: 작업 결과 임시 메시지 (None이면 기본 키힌트).
+pub fn render_list(
+    f: &mut Frame,
+    state: &AppState,
+    cursor: usize,
+    search_mode: bool,
+    selected_ids: &HashSet<String>,
+    status_message: Option<&str>,
+) {
     let area = f.area();
 
     // 레이아웃: 헤더 1줄 + [검색바 1줄 if search_mode] + 테이블 본문 + 상태바 1줄
@@ -61,6 +71,16 @@ pub fn render_list(f: &mut Frame, state: &AppState, cursor: usize, search_mode: 
             format!("Sort: {}", state.sort.display()),
             Style::default().fg(Color::Yellow),
         ),
+        if !selected_ids.is_empty() {
+            Span::styled(
+                format!("  [{}개 선택]", selected_ids.len()),
+                Style::default()
+                    .fg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD),
+            )
+        } else {
+            Span::raw("")
+        },
     ]);
     f.render_widget(Paragraph::new(header_line), chunks[0]);
 
@@ -69,14 +89,13 @@ pub fn render_list(f: &mut Frame, state: &AppState, cursor: usize, search_mode: 
         let query = state.search_query.as_deref().unwrap_or("");
         let match_count = state.filtered_indices().len();
         let suffix = format!("({} matches · Esc 취소)", match_count);
-        // 하드코딩 공백 대신 레이아웃: [prefix " /"] + [Min 0: query + cursor │] + [suffix]
         let prefix_width = 2u16; // " /" 폭
         let suffix_width = suffix.chars().count() as u16;
         let bar_chunks = Layout::default()
             .direction(Direction::Horizontal)
             .constraints([
                 Constraint::Length(prefix_width),
-                Constraint::Min(0), // query + cursor 영역 (가변)
+                Constraint::Min(0),
                 Constraint::Length(suffix_width),
             ])
             .split(chunk);
@@ -95,8 +114,7 @@ pub fn render_list(f: &mut Frame, state: &AppState, cursor: usize, search_mode: 
             Span::styled(query, Style::default().fg(Color::White)),
             Span::styled("│", Style::default().fg(Color::White)),
         ]);
-        let query_area = bar_chunks[1];
-        f.render_widget(Paragraph::new(query_line), query_area);
+        f.render_widget(Paragraph::new(query_line), bar_chunks[1]);
 
         f.render_widget(
             Paragraph::new(Line::from(Span::styled(
@@ -122,7 +140,15 @@ pub fn render_list(f: &mut Frame, state: &AppState, cursor: usize, search_mode: 
             .style(Style::default().fg(Color::Yellow));
         f.render_widget(p, table_chunk);
 
-        render_statusbar(f, status_chunk, state, 0, search_mode);
+        render_statusbar(
+            f,
+            status_chunk,
+            state,
+            0,
+            search_mode,
+            selected_ids,
+            status_message,
+        );
         return;
     }
 
@@ -136,7 +162,15 @@ pub fn render_list(f: &mut Frame, state: &AppState, cursor: usize, search_mode: 
             )
             .style(Style::default().fg(Color::Yellow));
         f.render_widget(p, table_chunk);
-        render_statusbar(f, status_chunk, state, 0, search_mode);
+        render_statusbar(
+            f,
+            status_chunk,
+            state,
+            0,
+            search_mode,
+            selected_ids,
+            status_message,
+        );
         return;
     }
 
@@ -162,17 +196,17 @@ pub fn render_list(f: &mut Frame, state: &AppState, cursor: usize, search_mode: 
         .enumerate()
         .map(|(display_i, &real_i)| {
             let session = &state.sessions[real_i];
-            let is_sel = display_i == cursor;
+            let is_sel_cursor = display_i == cursor;
+            let is_checked = selected_ids.contains(&session.session_id);
 
-            // 마커: 선택(▸) + 활성(●)
-            let marker = if is_sel && session.is_active {
-                "▸●"
-            } else if is_sel {
-                "▸ "
-            } else if session.is_active {
-                " ●"
-            } else {
-                "  "
+            // 마커: ▸ 커서, ● 활성, ✓ 다중선택
+            let marker = match (is_sel_cursor, is_checked, session.is_active) {
+                (true, true, _) => "▸✓",
+                (true, false, true) => "▸●",
+                (true, false, false) => "▸ ",
+                (false, true, _) => " ✓",
+                (false, false, true) => " ●",
+                (false, false, false) => "  ",
             };
 
             let title = safe_truncate(&session.title, 40);
@@ -191,8 +225,10 @@ pub fn render_list(f: &mut Frame, state: &AppState, cursor: usize, search_mode: 
                 cells.push(Cell::from(session.msg_count.to_string()));
             }
 
-            let style = if is_sel {
+            let style = if is_sel_cursor {
                 Style::default().add_modifier(Modifier::REVERSED)
+            } else if is_checked {
+                Style::default().fg(Color::Cyan)
             } else if session.is_active {
                 Style::default().fg(Color::Green)
             } else {
@@ -223,7 +259,15 @@ pub fn render_list(f: &mut Frame, state: &AppState, cursor: usize, search_mode: 
 
     f.render_stateful_widget(table, table_chunk, &mut table_state);
 
-    render_statusbar(f, status_chunk, state, cursor, search_mode);
+    render_statusbar(
+        f,
+        status_chunk,
+        state,
+        cursor,
+        search_mode,
+        selected_ids,
+        status_message,
+    );
 }
 
 fn build_header_cells(show_project: bool, show_msgs: bool) -> Vec<Cell<'static>> {
@@ -259,8 +303,21 @@ fn render_statusbar(
     state: &AppState,
     _cursor: usize,
     search_mode: bool,
+    selected_ids: &HashSet<String>,
+    status_message: Option<&str>,
 ) {
     let mut spans = vec![];
+
+    // 임시 상태 메시지가 있으면 우선 표시
+    if let Some(msg) = status_message {
+        spans.push(Span::styled(
+            format!(" {} ", msg),
+            Style::default().fg(Color::Green),
+        ));
+        let status = Paragraph::new(Line::from(spans));
+        f.render_widget(status, area);
+        return;
+    }
 
     // 스킵 카운트 (FR-12)
     if state.stats.skipped_lines > 0 || state.stats.skipped_files > 0 {
@@ -287,9 +344,18 @@ fn render_statusbar(
             " ↑↓ 이동  Enter 이어하기  Esc 검색 취소",
             Style::default().fg(Color::DarkGray),
         ));
+    } else if !selected_ids.is_empty() {
+        // 다중선택 활성 시 선택 관련 키힌트
+        spans.push(Span::styled(
+            format!(
+                " {}개 선택됨  Space 선택토글  a 전체선택/해제  Del 삭제  Esc 선택 해제",
+                selected_ids.len()
+            ),
+            Style::default().fg(Color::Cyan),
+        ));
     } else {
         spans.push(Span::styled(
-            " ↑↓/jk 이동  Enter 이어하기  / 검색  s 정렬  S 방향  ? 도움말  q 종료",
+            " ↑↓/jk 이동  Enter 이어하기  / 검색  s 정렬  Space 선택  a 전체선택  Del 삭제  T 휴지통  ? 도움말  q 종료",
             Style::default().fg(Color::DarkGray),
         ));
     }

@@ -3,6 +3,7 @@ mod data;
 mod domain;
 mod parser;
 mod service;
+mod trash;
 mod ui;
 
 use anyhow::Result;
