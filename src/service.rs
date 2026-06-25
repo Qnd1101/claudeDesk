@@ -190,6 +190,8 @@ pub struct AppState {
     pub sort: SortState,
     /// 검색 쿼리 (None = 검색 비활성, Some("") = 빈 쿼리)
     pub search_query: Option<String>,
+    /// 다중선택된 session_id 집합 (FR-04)
+    pub selected_ids: std::collections::HashSet<String>,
 }
 
 impl AppState {
@@ -202,6 +204,7 @@ impl AppState {
             projects_root: service.config.projects_root.clone(),
             sort,
             search_query: None,
+            selected_ids: std::collections::HashSet::new(),
         })
     }
 
@@ -440,6 +443,7 @@ mod tests {
             projects_root: PathBuf::from("/tmp"),
             sort: SortState::default(),
             search_query: None,
+            selected_ids: std::collections::HashSet::new(),
         };
         let idx = state.filtered_indices();
         assert_eq!(idx, vec![0, 1]);
@@ -457,6 +461,7 @@ mod tests {
             projects_root: PathBuf::from("/tmp"),
             sort: SortState::default(),
             search_query: Some("docker".to_string()),
+            selected_ids: std::collections::HashSet::new(),
         };
         let idx = state.filtered_indices();
         assert_eq!(idx, vec![0, 2]);
@@ -473,6 +478,7 @@ mod tests {
             projects_root: PathBuf::from("/tmp"),
             sort: SortState::default(),
             search_query: Some("rust".to_string()),
+            selected_ids: std::collections::HashSet::new(),
         };
         let idx = state.filtered_indices();
         assert_eq!(idx, vec![0]);
@@ -502,6 +508,7 @@ mod tests {
             projects_root: PathBuf::from("/tmp"),
             sort: SortState::default(),
             search_query: Some("뒷부분키워드".to_string()),
+            selected_ids: std::collections::HashSet::new(),
         };
         let idx = state.filtered_indices();
         assert_eq!(
