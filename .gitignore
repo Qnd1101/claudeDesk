@@ -1,7 +1,7 @@
 # Rust
 /target/
 **/*.rs.bk
-Cargo.lock        # 바이너리 크레이트면 커밋 권장이나, 단일 앱 초기엔 무시. M0에서 정책 확정.
+# Cargo.lock 은 바이너리 크레이트이므로 커밋한다(재현 가능 빌드/릴리스).
 
 # 임시 작업 산출물 (charter: research/plan은 커밋 금지)
 research.md

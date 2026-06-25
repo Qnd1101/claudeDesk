@@ -1,0 +1,9 @@
+{"type":"agent-setting","sessionId":"11111111-1111-1111-1111-111111111111","agentSetting":{"name":"default"}}
+{"type":"mode","sessionId":"11111111-1111-1111-1111-111111111111","mode":"auto"}
+{"type":"permission-mode","sessionId":"11111111-1111-1111-1111-111111111111","permissionMode":"default"}
+{"type":"file-history-snapshot","sessionId":"11111111-1111-1111-1111-111111111111","files":[]}
+{"type":"attachment","sessionId":"11111111-1111-1111-1111-111111111111","data":"none"}
+{"type":"assistant","sessionId":"11111111-1111-1111-1111-111111111111","timestamp":"2026-06-25T01:00:00Z","cwd":"/home/synth/project","message":{"role":"assistant","content":"안녕하세요!"}}
+{"type":"user","sessionId":"11111111-1111-1111-1111-111111111111","timestamp":"2026-06-25T01:00:01Z","cwd":"/home/synth/project","gitBranch":"main","version":"1.0.0","message":{"role":"user","content":"claudeDesk PRD 재설계 요청"},"uuid":"aaaa","parentUuid":null}
+{"type":"assistant","sessionId":"11111111-1111-1111-1111-111111111111","timestamp":"2026-06-25T01:00:02Z","cwd":"/home/synth/project","message":{"role":"assistant","content":"알겠습니다."}}
+{"type":"user","sessionId":"11111111-1111-1111-1111-111111111111","timestamp":"2026-06-25T01:00:03Z","cwd":"/home/synth/project","message":{"role":"user","content":"두 번째 메시지"},"uuid":"bbbb","parentUuid":"aaaa"}
