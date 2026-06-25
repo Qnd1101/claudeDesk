@@ -53,6 +53,10 @@ fn test_fixtures_immutable_after_parse() {
         "corrupted_lines.jsonl",
         "empty.jsonl",
         "no_user_lines.jsonl",
+        // 엣지 픽스처 (§5.11, FAIL-03)
+        "emoji_and_unicode.jsonl",
+        "over_scan_limit.jsonl",
+        "null_content_fallback.jsonl",
     ];
 
     for name in &fixtures {
@@ -183,4 +187,55 @@ fn test_is_subagent_path() {
 
     let p2 = Path::new("/home/.claude/projects/D--Dev/abc.jsonl");
     assert!(!is_subagent_path(p2));
+}
+
+// ── 엣지 픽스처 테스트 (§5.11 FAIL-03) ──────────────────────────────────────
+
+/// 이모지/다국어 본문 → 크래시 없이 제목 추출 (FAIL-03)
+#[test]
+fn test_emoji_unicode_no_crash() {
+    let meta = make_meta("emoji_and_unicode.jsonl");
+    let result = parse_session(&meta).expect("이모지 픽스처 파싱 크래시 금지");
+    // 제목이 비어 있지 않고(Untitled 또는 실제 텍스트), 크래시 없어야 함
+    assert!(!result.title.is_empty());
+    // 이모지를 포함한 첫 user 줄이 제목으로 추출돼야 함
+    assert!(
+        result.title.contains("이모지") || result.title.contains("🚀"),
+        "이모지/다국어 제목 추출 실패: {}",
+        result.title
+    );
+}
+
+/// MAX_SCAN_LINES(64) 초과 메타 선행 → Untitled Session 경계 동작 (FAIL-03)
+#[test]
+fn test_over_scan_limit_untitled() {
+    let meta = make_meta("over_scan_limit.jsonl");
+    let result = parse_session(&meta).expect("over_scan_limit 파싱 크래시 금지");
+    // 64줄 초과 탐색 포기 → Untitled
+    assert_eq!(
+        result.title, "Untitled Session",
+        "MAX_SCAN_LINES 초과 시 Untitled 미반환: {}",
+        result.title
+    );
+    // 메시지 수는 user+assistant 카운트 계속돼야 함
+    assert!(
+        result.msg_count >= 1,
+        "over_scan 픽스처 메시지 수 0 (assistant 1개 이상 있어야 함)"
+    );
+}
+
+/// message.content가 null인 user 줄 → 다음 user 줄로 폴백 (FAIL-03)
+#[test]
+fn test_null_content_fallback() {
+    let meta = make_meta("null_content_fallback.jsonl");
+    let result = parse_session(&meta).expect("null_content 파싱 크래시 금지");
+    // 첫 user 줄 content=null → extract_text_from_content은 None 반환
+    // → 다음 user 줄(두 번째 user)이 제목이 돼야 함
+    assert_eq!(
+        result.title, "null content 폴백 후 이 줄이 제목이 돼야 함",
+        "null content 폴백 실패: {}",
+        result.title
+    );
+    // 메시지 수: user 2 + assistant 1 = 3
+    assert_eq!(result.msg_count, 3, "메시지 수 불일치");
 }

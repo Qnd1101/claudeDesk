@@ -11,20 +11,40 @@ use crate::service::AppState;
 
 use super::time::relative_time;
 
-pub fn render_list(f: &mut Frame, state: &AppState, selected: usize) {
+/// 메인 리스트 렌더.
+/// `search_mode`: true이면 검색 입력바 추가 렌더.
+pub fn render_list(f: &mut Frame, state: &AppState, cursor: usize, search_mode: bool) {
     let area = f.area();
 
-    // 레이아웃: 헤더 1줄 + 테이블 본문 + 상태바 1줄
-    let chunks = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
+    // 레이아웃: 헤더 1줄 + [검색바 1줄 if search_mode] + 테이블 본문 + 상태바 1줄
+    let constraints = if search_mode {
+        vec![
+            Constraint::Length(1), // 헤더
+            Constraint::Length(1), // 검색바
+            Constraint::Min(1),    // 테이블
+            Constraint::Length(1), // 상태바
+        ]
+    } else {
+        vec![
             Constraint::Length(1), // 헤더
             Constraint::Min(1),    // 테이블
             Constraint::Length(1), // 상태바
-        ])
+        ]
+    };
+
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints(constraints)
         .split(area);
 
-    // 헤더 (타이틀 + RAM은 MVP에서 생략)
+    // 청크 인덱스 계산
+    let (search_chunk, table_chunk, status_chunk) = if search_mode {
+        (Some(chunks[1]), chunks[2], chunks[3])
+    } else {
+        (None, chunks[1], chunks[2])
+    };
+
+    // ── 헤더 ──────────────────────────────────────────────────────────────
     let header_line = Line::from(vec![
         Span::styled(
             " claudeDesk ",
@@ -36,8 +56,59 @@ pub fn render_list(f: &mut Frame, state: &AppState, selected: usize) {
             format!("v{}", env!("CARGO_PKG_VERSION")),
             Style::default().fg(Color::DarkGray),
         ),
+        Span::raw("  "),
+        Span::styled(
+            format!("Sort: {}", state.sort.display()),
+            Style::default().fg(Color::Yellow),
+        ),
     ]);
     f.render_widget(Paragraph::new(header_line), chunks[0]);
+
+    // ── 검색바 ────────────────────────────────────────────────────────────
+    if let Some(chunk) = search_chunk {
+        let query = state.search_query.as_deref().unwrap_or("");
+        let match_count = state.filtered_indices().len();
+        let suffix = format!("({} matches · Esc 취소)", match_count);
+        // 하드코딩 공백 대신 레이아웃: [prefix " /"] + [Min 0: query + cursor │] + [suffix]
+        let prefix_width = 2u16; // " /" 폭
+        let suffix_width = suffix.chars().count() as u16;
+        let bar_chunks = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([
+                Constraint::Length(prefix_width),
+                Constraint::Min(0), // query + cursor 영역 (가변)
+                Constraint::Length(suffix_width),
+            ])
+            .split(chunk);
+
+        f.render_widget(
+            Paragraph::new(Line::from(Span::styled(
+                " /",
+                Style::default()
+                    .fg(Color::Green)
+                    .add_modifier(Modifier::BOLD),
+            ))),
+            bar_chunks[0],
+        );
+
+        let query_line = Line::from(vec![
+            Span::styled(query, Style::default().fg(Color::White)),
+            Span::styled("│", Style::default().fg(Color::White)),
+        ]);
+        let query_area = bar_chunks[1];
+        f.render_widget(Paragraph::new(query_line), query_area);
+
+        f.render_widget(
+            Paragraph::new(Line::from(Span::styled(
+                suffix,
+                Style::default().fg(Color::DarkGray),
+            ))),
+            bar_chunks[2],
+        );
+    }
+
+    // ── 필터된 인덱스 목록 ────────────────────────────────────────────────
+    let indices = state.filtered_indices();
 
     // 빈 목록 처리
     if state.sessions.is_empty() {
@@ -49,9 +120,23 @@ pub fn render_list(f: &mut Frame, state: &AppState, selected: usize) {
         let p = Paragraph::new(empty_msg)
             .block(Block::default().borders(Borders::ALL).title(" Sessions "))
             .style(Style::default().fg(Color::Yellow));
-        f.render_widget(p, chunks[1]);
+        f.render_widget(p, table_chunk);
 
-        render_statusbar(f, chunks[2], state, 0);
+        render_statusbar(f, status_chunk, state, 0, search_mode);
+        return;
+    }
+
+    // 검색 결과 없음
+    if indices.is_empty() {
+        let p = Paragraph::new("검색 결과 없음")
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .title(" Sessions (0) "),
+            )
+            .style(Style::default().fg(Color::Yellow));
+        f.render_widget(p, table_chunk);
+        render_statusbar(f, status_chunk, state, 0, search_mode);
         return;
     }
 
@@ -71,13 +156,13 @@ pub fn render_list(f: &mut Frame, state: &AppState, selected: usize) {
         .style(Style::default().add_modifier(Modifier::BOLD))
         .bottom_margin(0);
 
-    // 데이터 행
-    let rows: Vec<Row> = state
-        .sessions
+    // 데이터 행 (필터된 인덱스로만)
+    let rows: Vec<Row> = indices
         .iter()
         .enumerate()
-        .map(|(i, session)| {
-            let is_sel = i == selected;
+        .map(|(display_i, &real_i)| {
+            let session = &state.sessions[real_i];
+            let is_sel = display_i == cursor;
 
             // 마커: 선택(▸) + 활성(●)
             let marker = if is_sel && session.is_active {
@@ -121,22 +206,24 @@ pub fn render_list(f: &mut Frame, state: &AppState, selected: usize) {
     // 컬럼 폭 제약
     let widths = build_widths(show_project, show_msgs);
 
+    let title_str = if search_mode {
+        format!(" Sessions ({}/{}) ", indices.len(), state.sessions.len())
+    } else {
+        format!(" Sessions ({}) ", state.sessions.len())
+    };
+
     let table = Table::new(rows, widths)
         .header(header)
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .title(format!(" Sessions ({}) ", state.sessions.len())),
-        )
+        .block(Block::default().borders(Borders::ALL).title(title_str))
         .row_highlight_style(Style::default().add_modifier(Modifier::REVERSED))
         .highlight_symbol("");
 
     let mut table_state = TableState::default();
-    table_state.select(Some(selected));
+    table_state.select(Some(cursor));
 
-    f.render_stateful_widget(table, chunks[1], &mut table_state);
+    f.render_stateful_widget(table, table_chunk, &mut table_state);
 
-    render_statusbar(f, chunks[2], state, selected);
+    render_statusbar(f, status_chunk, state, cursor, search_mode);
 }
 
 fn build_header_cells(show_project: bool, show_msgs: bool) -> Vec<Cell<'static>> {
@@ -170,7 +257,8 @@ fn render_statusbar(
     f: &mut Frame,
     area: ratatui::layout::Rect,
     state: &AppState,
-    _selected: usize,
+    _cursor: usize,
+    search_mode: bool,
 ) {
     let mut spans = vec![];
 
@@ -194,10 +282,17 @@ fn render_statusbar(
     spans.push(Span::raw("| "));
 
     // 키 힌트
-    spans.push(Span::styled(
-        " ↑↓/jk 이동  Enter 이어하기  ? 도움말  q 종료",
-        Style::default().fg(Color::DarkGray),
-    ));
+    if search_mode {
+        spans.push(Span::styled(
+            " ↑↓ 이동  Enter 이어하기  Esc 검색 취소",
+            Style::default().fg(Color::DarkGray),
+        ));
+    } else {
+        spans.push(Span::styled(
+            " ↑↓/jk 이동  Enter 이어하기  / 검색  s 정렬  S 방향  ? 도움말  q 종료",
+            Style::default().fg(Color::DarkGray),
+        ));
+    }
 
     let status = Paragraph::new(Line::from(spans));
     f.render_widget(status, area);

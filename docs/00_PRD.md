@@ -146,7 +146,7 @@
 
 ### 5.8 패키징·배포 (신설)
 
-* **산출물:** OS·아키별 **단일 정적 바이너리**. 타깃: `x86_64-pc-windows-msvc`, `x86_64-apple-darwin`, `aarch64-apple-darwin`, `x86_64-unknown-linux-gnu`(가능시 `-musl`).
+* **산출물:** OS·아키별 **단일 정적 바이너리**. 타깃(v0.3.0 확정): `x86_64-pc-windows-msvc`, `aarch64-apple-darwin`, `x86_64-unknown-linux-musl`(정적). **macOS Intel(`x86_64-apple-darwin`)은 제외**(사용자 결정 2026-06-25, Intel 러너 희소·수요 낮음 — Apple Silicon으로 대체).
 * **배포:** GitHub Releases(바이너리 첨부) 1순위. 패키지 매니저(brew/scoop/cargo-binstall)는 후순위.
 * **버전:** SemVer. 버전 파일 단일화. (운영 부담 최소 — CI는 release 태그 시 빌드.)
 

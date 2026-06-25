@@ -7,7 +7,7 @@ use ratatui::{
 };
 
 pub fn render_help(f: &mut Frame) {
-    let area = centered_rect(48, 16, f.area());
+    let area = centered_rect(52, 22, f.area());
 
     f.render_widget(Clear, area);
 
@@ -42,6 +42,26 @@ pub fn render_help(f: &mut Frame) {
             Span::raw("  세션 이어하기 (resume)"),
         ]),
         Line::from(""),
+        // 검색 (FR-05)
+        Line::from(vec![
+            Span::styled("  /    ", Style::default().fg(Color::Cyan)),
+            Span::raw("검색 진입 (제목·프로젝트 incremental 필터)"),
+        ]),
+        Line::from(vec![
+            Span::styled("  Esc  ", Style::default().fg(Color::Cyan)),
+            Span::raw("검색 해제 · 전체 목록 복귀"),
+        ]),
+        Line::from(""),
+        // 정렬 (FR-07)
+        Line::from(vec![
+            Span::styled("  s    ", Style::default().fg(Color::Magenta)),
+            Span::raw("정렬 키 순환  Modified → Created → Title → Messages"),
+        ]),
+        Line::from(vec![
+            Span::styled("  S    ", Style::default().fg(Color::Magenta)),
+            Span::raw("정렬 방향 토글  ↓(내림차순) ↔ ↑(오름차순)"),
+        ]),
+        Line::from(""),
         Line::from(vec![
             Span::styled("  ?    ", Style::default().fg(Color::Cyan)),
             Span::raw("도움말 토글        "),
@@ -54,7 +74,7 @@ pub fn render_help(f: &mut Frame) {
         ]),
         Line::from(""),
         Line::from(vec![Span::styled(
-            "  [M2] 검색(/), 정렬(s), 삭제(Del) — 추후 구현",
+            "  [M2 예정] Space 선택  Del 삭제  g 그룹",
             Style::default().fg(Color::DarkGray),
         )]),
         Line::from(""),
@@ -73,7 +93,7 @@ pub fn render_help(f: &mut Frame) {
     f.render_widget(paragraph, area);
 }
 
-/// 중앙 정렬 Rect (percent_x, height in lines)
+/// 중앙 정렬 Rect (width, height in lines)
 fn centered_rect(width: u16, height: u16, area: Rect) -> Rect {
     let popup_width = width.min(area.width);
     let popup_height = height.min(area.height);

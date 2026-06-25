@@ -31,6 +31,8 @@ struct RawMessage {
 /// 파싱 결과
 pub struct ParseResult {
     pub title: String,
+    /// 잘리기 전 첫 user 텍스트 전체(트림). title이 80자 절단된 경우 검색 범위 확보용.
+    pub first_user_raw: Option<String>,
     pub cwd: String,
     pub created: SystemTime,
     pub msg_count: usize,
@@ -43,6 +45,7 @@ pub fn parse_session(file_meta: &FileMeta) -> Result<ParseResult> {
     let reader = BufReader::new(file);
 
     let mut title: Option<String> = None;
+    let mut first_user_raw: Option<String> = None;
     let mut cwd: Option<String> = None;
     let mut created: Option<SystemTime> = None;
     let mut msg_count: usize = 0;
@@ -106,6 +109,7 @@ pub fn parse_session(file_meta: &FileMeta) -> Result<ParseResult> {
                     let trimmed_text = text.trim().to_string();
                     if !trimmed_text.is_empty() {
                         title = Some(truncate_title(&trimmed_text));
+                        first_user_raw = Some(trimmed_text);
                         found_user = true;
                     }
                 }
@@ -118,6 +122,7 @@ pub fn parse_session(file_meta: &FileMeta) -> Result<ParseResult> {
 
     Ok(ParseResult {
         title: title.unwrap_or_else(|| "Untitled Session".to_string()),
+        first_user_raw,
         cwd: cwd.unwrap_or_default(),
         created: created.unwrap_or(file_meta.ctime),
         msg_count,
@@ -172,6 +177,15 @@ fn truncate_title(text: &str) -> String {
     }
 }
 
+/// 검색 대상 텍스트 조립: title + first_user_raw(있으면) + cwd 소문자 결합 (FR-05)
+/// `search_text` 구성 로직의 단일 진실원본 — build_session과 테스트 헬퍼가 공유.
+pub fn build_search_text(title: &str, first_user_raw: Option<&str>, cwd: &str) -> String {
+    match first_user_raw {
+        Some(raw) if raw != title => format!("{} {} {}", title, raw, cwd).to_lowercase(),
+        _ => format!("{} {}", title, cwd).to_lowercase(),
+    }
+}
+
 /// FileMeta + ParseResult → Session 조립
 pub fn build_session(
     file_meta: &FileMeta,
@@ -202,6 +216,9 @@ pub fn build_session(
     // 활성 세션 판정: mtime이 now - active_window_secs 이내
     let is_active = is_recently_modified(&file_meta.mtime, active_window_secs);
 
+    // 검색 대상 텍스트: 공용 함수로 조립 (FR-05)
+    let search_text = build_search_text(&result.title, result.first_user_raw.as_deref(), &cwd);
+
     Session {
         session_id,
         title: result.title,
@@ -212,6 +229,7 @@ pub fn build_session(
         is_active,
         path: file_meta.path.clone(),
         skipped_lines: result.skipped_lines,
+        search_text,
     }
 }
 

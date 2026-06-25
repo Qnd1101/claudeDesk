@@ -1,0 +1,4 @@
+{"type":"agent-setting","sessionId":"gggg3333-gggg-gggg-gggg-gggg33333333","agentSetting":{}}
+{"type":"user","sessionId":"gggg3333-gggg-gggg-gggg-gggg33333333","timestamp":"2026-06-25T12:00:00Z","cwd":"/home/synth/null-content","message":{"role":"user","content":null},"uuid":"gg01","parentUuid":null}
+{"type":"assistant","sessionId":"gggg3333-gggg-gggg-gggg-gggg33333333","timestamp":"2026-06-25T12:00:01Z","message":{"role":"assistant","content":"첫 응답"}}
+{"type":"user","sessionId":"gggg3333-gggg-gggg-gggg-gggg33333333","timestamp":"2026-06-25T12:00:02Z","cwd":"/home/synth/null-content","message":{"role":"user","content":"null content 폴백 후 이 줄이 제목이 돼야 함"},"uuid":"gg02","parentUuid":"gg01"}
