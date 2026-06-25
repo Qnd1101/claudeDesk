@@ -1,0 +1,69 @@
+name: Release (CD)
+
+# 태그 v* push 시 OS·아키별 단일 바이너리를 빌드해 GitHub Release에 첨부한다.
+# README의 "다운로드 → 실행" 흐름이 이 산출물로 성립한다.
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: build ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+          - os: macos-13
+            target: x86_64-apple-darwin
+          - os: macos-latest
+            target: aarch64-apple-darwin
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Build release
+        run: cargo build --release --target ${{ matrix.target }}
+
+      - name: Package
+        id: package
+        shell: bash
+        run: |
+          VERSION="${GITHUB_REF_NAME}"
+          BIN="claudedesk"
+          DIST="claudedesk-${VERSION}-${{ matrix.target }}"
+          mkdir -p "dist/${DIST}"
+          if [ "${{ matrix.os }}" = "windows-latest" ]; then
+            cp "target/${{ matrix.target }}/release/${BIN}.exe" "dist/${DIST}/"
+          else
+            cp "target/${{ matrix.target }}/release/${BIN}" "dist/${DIST}/"
+          fi
+          cp README.md LICENSE* CHANGELOG.md "dist/${DIST}/" 2>/dev/null || true
+          cd dist
+          if [ "${{ matrix.os }}" = "windows-latest" ]; then
+            7z a "${DIST}.zip" "${DIST}" >/dev/null
+            echo "asset=dist/${DIST}.zip" >> "$GITHUB_OUTPUT"
+          else
+            tar czf "${DIST}.tar.gz" "${DIST}"
+            echo "asset=dist/${DIST}.tar.gz" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Upload to Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ steps.package.outputs.asset }}
+          generate_release_notes: true
+          fail_on_unmatched_files: true

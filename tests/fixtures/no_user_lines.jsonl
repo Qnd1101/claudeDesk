@@ -1,0 +1,3 @@
+{"type":"agent-setting","sessionId":"44444444-4444-4444-4444-444444444444","agentSetting":{}}
+{"type":"mode","sessionId":"44444444-4444-4444-4444-444444444444","mode":"auto"}
+{"type":"assistant","sessionId":"44444444-4444-4444-4444-444444444444","timestamp":"2026-06-25T04:00:00Z","cwd":"/home/synth/nouser","message":{"role":"assistant","content":"user 없는 세션"}}

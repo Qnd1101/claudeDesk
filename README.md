@@ -1,39 +1,114 @@
 # claudeDesk
 
-> Claude Code의 로컬 세션(채팅방)을 **초경량 RAM(<20MB 목표)**으로 관리하는 크로스플랫폼 **TUI** 툴.
-> 세션 조회·검색·정렬·이어하기(resume)·안전 삭제·별칭이 핵심.
-> 스택: **Rust + ratatui(crossterm) + serde_json**.
+> Claude Code의 로컬 세션(채팅방)을 **초경량 RAM**으로 관리하는 크로스플랫폼 **TUI** 툴.
+> 세션을 한눈에 보고, 골라서 **바로 이어하기(resume)**. 무거운 GUI 없이 단일 바이너리로.
 
 [![CI (Gate A)](https://github.com/Qnd1101/claudeDesk/actions/workflows/ci.yml/badge.svg)](https://github.com/Qnd1101/claudeDesk/actions/workflows/ci.yml)
+[![Release (CD)](https://github.com/Qnd1101/claudeDesk/actions/workflows/release.yml/badge.svg)](https://github.com/Qnd1101/claudeDesk/actions/workflows/release.yml)
+[![Latest Release](https://img.shields.io/github/v/release/Qnd1101/claudeDesk)](https://github.com/Qnd1101/claudeDesk/releases/latest)
 
-## 왜?
+```text
+┌ claudeDesk ───────────────────────────────────── Local ┐
+│  Sessions: 27   Skipped: 0   [?] Help                   │
+├─────────────────────────────────────────────────────────┤
+│   Title                     Project          Modified   │
+│ ▸ [claudeDesk] PRD 재설계    D:\Dev\claudeDesk 2분 전     │
+│   [BugFix] Docker socket     D:\Dev\gatelink  1시간 전    │
+│   Untitled Session           C:\Users\PC      어제        │
+├─────────────────────────────────────────────────────────┤
+│ Enter 이어하기 · ↑↓ 이동 · ? 도움말 · q 종료              │
+└─────────────────────────────────────────────────────────┘
+```
 
-Claude Code 세션이 `~/.claude/projects/`에 수백 개 누적되지만 기본 CLI로는 **어느 세션이 무엇이었는지 식별·재진입이 번거롭다.** 기존 AI 관리 GUI는 Electron 기반이라 무겁다. claudeDesk는 **단일 정적 바이너리 + 초경량 TUI**로 이를 해결한다.
+## 설치 (Install)
 
-## 핵심 원칙
+### 1) 릴리스에서 다운로드 (권장)
 
-- **Non-Destructive:** 원본 JSONL은 **읽기 전용**. 부가정보(별칭 등)는 사이드카(`~/.claude/claudedesk/`)에 분리.
-- **Privacy First:** 외부 전송 0, 텔레메트리 없음, 100% 로컬.
-- **Ultra-Low RAM:** 전체 파싱 금지("첫 user 줄까지 스캔 + `mtime` stat"). RAM<20MB는 M0에서 **실측 검증**.
+[**최신 릴리스**](https://github.com/Qnd1101/claudeDesk/releases/latest)에서 OS에 맞는 파일을 받습니다.
 
-## 문서 (`docs/`)
-
-| 문서 | 내용 |
+| OS | 파일 |
 | :--- | :--- |
-| [docs/README.md](docs/README.md) | 패키지 인덱스(여기서 시작) |
-| [docs/00_PRD.md](docs/00_PRD.md) | 제품 요구사항 v2.1.0 — FR-01~13, 측정가능 NFR, 기술 부록 A~J |
-| [docs/01_TASK_BREAKDOWN.md](docs/01_TASK_BREAKDOWN.md) | 마일스톤·Epic(12)·Task(45) 분할, critical path |
-| [docs/02_UIUX_DESIGN.md](docs/02_UIUX_DESIGN.md) | TUI 설계 — 화면·키맵·반응형·접근성 |
-| [docs/03_DEV_KICKOFF.md](docs/03_DEV_KICKOFF.md) | 개발 착수 가이드 + **§9 Git 워크플로우/자율 운영** |
+| Windows (x64) | `claudedesk-vX.Y.Z-x86_64-pc-windows-msvc.zip` |
+| macOS (Apple Silicon) | `claudedesk-vX.Y.Z-aarch64-apple-darwin.tar.gz` |
+| macOS (Intel) | `claudedesk-vX.Y.Z-x86_64-apple-darwin.tar.gz` |
+| Linux (x64) | `claudedesk-vX.Y.Z-x86_64-unknown-linux-gnu.tar.gz` |
 
-## 개발 워크플로우
+**Windows**
+1. `.zip`을 풀고 `claudedesk.exe`를 원하는 폴더(예: `C:\Tools\`)에 둡니다.
+2. 그 폴더를 PATH에 추가하거나, 해당 폴더에서 `./claudedesk.exe` 실행.
 
-브랜치: `feature/* → develop → verify → main`. 모든 변경은 **PR**을 거치며 CI(게이트 A)·에이전트 검증(게이트 B)을 통과해야 한다. 상세는 [CONTRIBUTING.md](CONTRIBUTING.md).
+**macOS / Linux**
+```bash
+tar xzf claudedesk-vX.Y.Z-<target>.tar.gz
+cd claudedesk-vX.Y.Z-<target>
+chmod +x claudedesk
+sudo mv claudedesk /usr/local/bin/   # 또는 PATH 내 원하는 위치
+claudedesk
+```
+> macOS에서 "확인되지 않은 개발자" 경고 시: `xattr -d com.apple.quarantine ./claudedesk` 후 실행.
 
-## 상태
+### 2) 소스에서 빌드
 
-기획·워크플로우 베이스라인(v0.1.0). 코드 구현은 **M0(기술 검증 스파이크)**부터. → [docs/03_DEV_KICKOFF.md](docs/03_DEV_KICKOFF.md) §3.
+[Rust](https://rustup.rs/) 설치 후:
+```bash
+git clone https://github.com/Qnd1101/claudeDesk.git
+cd claudeDesk
+cargo build --release
+./target/release/claudedesk        # Windows: .\target\release\claudedesk.exe
+```
+
+## 사용법 (Usage)
+
+그냥 실행하면 `~/.claude/projects/`의 세션을 자동으로 스캔해 목록을 띄웁니다.
+```bash
+claudedesk
+```
+
+### 단축키
+
+| 키 | 동작 |
+| :--- | :--- |
+| `↑` / `k`, `↓` / `j` | 세션 이동 |
+| `Enter` | 선택 세션 **이어하기**(`claude --resume`) |
+| `?` | 도움말 오버레이 |
+| `q` / `Esc` | 종료 |
+
+### 동작 방식
+
+- 세션을 선택하고 `Enter`를 누르면 claudeDesk가 종료되며 해당 세션의 작업 폴더(`cwd`)에서 `claude --resume <id>`를 실행해 **그 대화로 곧장 복귀**합니다.
+- `claude` CLI가 PATH에 없으면, 실행할 정확한 명령과 폴더를 안내하고 종료합니다.
+
+## 요구사항 (Requirements)
+
+- **터미널**: Windows Terminal / iTerm2·Terminal.app / 일반 Linux 터미널.
+- **이어하기 기능**: [Claude Code](https://claude.com/claude-code) CLI(`claude`)가 설치되어 PATH에 있어야 합니다. (목록 보기만 할 때는 불필요.)
+
+## 설정 (Config)
+
+| 환경변수 | 설명 |
+| :--- | :--- |
+| `CLAUDEDESK_ROOT` | 세션 루트 경로 오버라이드 (기본 `~/.claude/projects`) |
+
+> 더 많은 설정(정렬·테마·시간표기 등)은 로드맵의 M3에서 `config.toml`로 제공 예정.
+
+## 원칙
+
+- **Non-Destructive:** 원본 세션 파일(`*.jsonl`)은 **절대 수정하지 않음**(읽기 전용). CI가 SHA 불변을 강제.
+- **Privacy First:** 외부 전송 0, 텔레메트리 없음, 100% 로컬.
+- **Ultra-Low RAM:** 세션 전체를 메모리에 올리지 않고 필요한 줄만 스트리밍.
+
+## 로드맵
+
+- ✅ **M1 (현재):** 세션 스캔 · 목록 · 이어하기 · 에러 가시성 · 도움말
+- ⬜ **M2:** 검색 · 정렬 · 안전 삭제(휴지통) · 프로젝트 그룹핑
+- ⬜ **M3:** 별칭 · 미리보기 · 설정 화면
+
+자세한 내용은 [docs/](docs/README.md) — PRD, Task 분할, UI/UX 설계, 개발 가이드.
+
+## 개발 / 기여
+
+브랜치 `feature/* → develop → verify → main`, 모든 변경은 PR + CI 통과. [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## License
 
-미정(TBD).
+MIT (예정) — [LICENSE](LICENSE).
