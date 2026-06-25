@@ -1,0 +1,7 @@
+{"type":"agent-setting","sessionId":"aaaabbbb-cccc-dddd-eeee-111122223333","agentSetting":{}}
+{"type":"user","sessionId":"aaaabbbb-cccc-dddd-eeee-111122223333","timestamp":"2026-06-25T10:00:00Z","cwd":"/home/synth/preview-test","message":{"role":"user","content":"첫 번째 user 메시지 — String content"},"uuid":"u001","parentUuid":null}
+{"type":"assistant","sessionId":"aaaabbbb-cccc-dddd-eeee-111122223333","timestamp":"2026-06-25T10:00:01Z","cwd":"/home/synth/preview-test","message":{"role":"assistant","content":"첫 번째 assistant 응답입니다."}}
+{"type":"user","sessionId":"aaaabbbb-cccc-dddd-eeee-111122223333","timestamp":"2026-06-25T10:00:02Z","cwd":"/home/synth/preview-test","message":{"role":"user","content":[{"type":"text","text":"두 번째 user — 블록 배열 텍스트"},{"type":"tool_use","id":"tu001","name":"Read","input":{}}]},"uuid":"u002","parentUuid":"u001"}
+{"type":"assistant","sessionId":"aaaabbbb-cccc-dddd-eeee-111122223333","timestamp":"2026-06-25T10:00:03Z","cwd":"/home/synth/preview-test","message":{"role":"assistant","content":[{"type":"tool_result","tool_use_id":"tu001","content":"파일 내용"},{"type":"text","text":"파일을 읽었습니다."}]}}
+{"type":"user","sessionId":"aaaabbbb-cccc-dddd-eeee-111122223333","timestamp":"2026-06-25T10:00:04Z","cwd":"/home/synth/preview-test","message":{"role":"user","content":"세 번째 user 메시지"},"uuid":"u003","parentUuid":"u002"}
+{"type":"assistant","sessionId":"aaaabbbb-cccc-dddd-eeee-111122223333","timestamp":"2026-06-25T10:00:05Z","cwd":"/home/synth/preview-test","message":{"role":"assistant","content":"세 번째 assistant 응답."}}
