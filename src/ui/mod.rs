@@ -2,6 +2,7 @@ mod help;
 mod layout;
 mod list;
 mod modal;
+mod preview;
 mod time;
 mod trash_view;
 
@@ -16,10 +17,20 @@ use std::collections::HashSet;
 use std::io::stdout;
 use std::time::Duration;
 
+use crate::preview::{read_preview, PreviewContent, MAX_PREVIEW_BYTES, MAX_PREVIEW_LINES};
 use crate::service::{exec_resume, resume_session, AppState, DisplayRow, ResumeResult};
+
+/// 미리보기 캐시 키 — 타입으로 세션/헤더를 구분한다.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum PreviewCacheKey {
+    /// 특정 세션의 미리보기 (session_id)
+    Session(String),
+    /// 그룹 헤더 또는 빈 목록 커서
+    Header,
+}
 use crate::trash::{purge_sessions, restore_sessions, soft_delete_sessions, TrashIndex};
 use help::render_help;
-use list::render_list;
+use list::{render_list, PREVIEW_MIN_WIDTH};
 use modal::{render_delete_confirm, render_purge_confirm, DeleteConfirmData, PurgeConfirmData};
 use trash_view::render_trash;
 
@@ -77,6 +88,12 @@ pub struct App {
     // ── 상태 메시지 ───────────────────────────────────────────────────────
     /// 임시 상태 메시지 (작업 결과 표시용)
     status_message: Option<String>,
+
+    // ── FR-08: 미리보기 ───────────────────────────────────────────────────
+    /// 미리보기 패널 열림 여부 (Normal 모드 전용 토글)
+    preview_open: bool,
+    /// 미리보기 캐시: (키, PreviewContent) — 같은 키이면 재읽기 금지
+    preview_cache: Option<(PreviewCacheKey, PreviewContent)>,
 }
 
 impl App {
@@ -102,6 +119,9 @@ impl App {
             purge_input: String::new(),
 
             status_message: None,
+
+            preview_open: false,
+            preview_cache: None,
         }
     }
 
@@ -165,6 +185,8 @@ impl App {
                             render_trash(f, &entries, self.trash_cursor, &self.trash_selected);
                         }
                         UiMode::DeleteConfirm => {
+                            let preview_content = self.current_preview_content();
+                            let preview_title = self.current_session_title();
                             render_list(
                                 f,
                                 &self.state,
@@ -172,6 +194,9 @@ impl App {
                                 false,
                                 &self.state.selected_ids.clone(),
                                 self.status_message.as_deref(),
+                                self.preview_open,
+                                preview_content,
+                                &preview_title,
                             );
                             let data = DeleteConfirmData {
                                 titles: &self.delete_titles,
@@ -190,6 +215,8 @@ impl App {
                         }
                         _ => {
                             let search_mode = self.mode == UiMode::Search;
+                            let preview_content = self.current_preview_content();
+                            let preview_title = self.current_session_title();
                             render_list(
                                 f,
                                 &self.state,
@@ -197,6 +224,9 @@ impl App {
                                 search_mode,
                                 &self.state.selected_ids.clone(),
                                 self.status_message.as_deref(),
+                                self.preview_open,
+                                preview_content,
+                                &preview_title,
                             );
                         }
                     }
@@ -303,6 +333,12 @@ impl App {
             // 도움말
             KeyCode::Char('?') => {
                 self.show_help = true;
+            }
+
+            // ── FR-08: 미리보기 토글 (p, Normal 모드 전용) ──────────────────
+            KeyCode::Char('p') => {
+                let term_width = crossterm::terminal::size().map(|(w, _)| w).unwrap_or(0);
+                self.toggle_preview(term_width);
             }
 
             // ── M2: 다중선택 (Space, FR-04) ─────────────────────────────
@@ -424,6 +460,9 @@ impl App {
             _ => {}
         }
 
+        // 키 처리 후 미리보기 캐시 갱신 (커서·상태 변경이 반영된 시점에 호출)
+        self.refresh_preview_cache();
+
         Ok(false)
     }
 
@@ -485,6 +524,8 @@ impl App {
 
             _ => {}
         }
+        // 검색 중에도 열려 있는 미리보기를 커서 이동에 맞게 갱신
+        self.refresh_preview_cache();
         Ok(false)
     }
 
@@ -870,5 +911,70 @@ impl App {
     fn current_trash_entry(&self) -> Option<&crate::trash::TrashEntry> {
         let entries = self.trash_index.sorted_entries();
         entries.get(self.trash_cursor).copied()
+    }
+
+    // ── FR-08: 미리보기 헬퍼 ─────────────────────────────────────────────
+
+    /// 미리보기 토글. 폭 부족 시 status_message 설정 후 반환.
+    fn toggle_preview(&mut self, term_width: u16) {
+        if !self.preview_open && term_width < PREVIEW_MIN_WIDTH {
+            self.status_message = Some(format!(
+                "터미널이 좁아 미리보기를 열 수 없습니다(≥{}칸 필요)",
+                PREVIEW_MIN_WIDTH
+            ));
+            return;
+        }
+        self.preview_open = !self.preview_open;
+        // 열 때 즉시 캐시 갱신
+        if self.preview_open {
+            self.refresh_preview_cache();
+        }
+    }
+
+    /// 현재 세션이 캐시 키와 다르면 `read_preview`를 호출해 캐시를 갱신한다.
+    /// 같은 키이면 재읽기 하지 않는다(캐시 hit).
+    /// `preview_open`이 false이면 비용 없이 즉시 반환한다.
+    fn refresh_preview_cache(&mut self) {
+        if !self.preview_open {
+            return;
+        }
+        match self.current_session() {
+            Some(session) => {
+                let key = PreviewCacheKey::Session(session.session_id.clone());
+                // 캐시 hit 확인
+                if let Some((ref cached_key, _)) = self.preview_cache {
+                    if cached_key == &key {
+                        return; // 같은 세션 — 재읽기 금지
+                    }
+                }
+                // 캐시 miss — 읽기 실행
+                let path = session.path.clone();
+                let content = read_preview(&path, MAX_PREVIEW_LINES, MAX_PREVIEW_BYTES);
+                self.preview_cache = Some((key, content));
+            }
+            None => {
+                // 그룹 헤더 또는 빈 목록 — 빈 content 캐시
+                if let Some((PreviewCacheKey::Header, _)) = self.preview_cache {
+                    return; // 이미 헤더 캐시 — 재생성 불필요
+                }
+                self.preview_cache = Some((PreviewCacheKey::Header, PreviewContent::empty()));
+            }
+        }
+    }
+
+    /// 현재 미리보기 캐시의 content 참조를 반환.
+    /// `preview_open`이 false이거나 캐시가 없으면 None.
+    fn current_preview_content(&self) -> Option<&PreviewContent> {
+        if !self.preview_open {
+            return None;
+        }
+        self.preview_cache.as_ref().map(|(_, c)| c)
+    }
+
+    /// 현재 세션 제목 반환 (미리보기 패널 타이틀용)
+    fn current_session_title(&self) -> String {
+        self.current_session()
+            .map(|s| s.title.clone())
+            .unwrap_or_default()
     }
 }

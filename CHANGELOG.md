@@ -5,6 +5,19 @@
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-06-25
+
+### Added (M3 — 미리보기 / 하우스키핑 강화)
+- **미리보기(FR-08):** `p`로 우측 분할 패널 토글(터미널 ≥100칸). 커서를 옮기면 선택 세션의 대화 스니펫(user/assistant 멀티턴)이 **실시간 갱신** — `claude`를 띄우지 않고 내용을 확인하고 삭제 여부를 판단한다. 세션 하우스키핑의 마지막 조각.
+- **스트리밍·RAM 바운드:** 미리보기는 파일 전체를 메모리에 올리지 않는다. `BufReader::take(MAX_BYTES=64KB)`로 파일 읽기량을 하드 실링하고, 단일 거대 줄(base64 이미지·대형 tool_result)도 `MAX_LINE_BYTES=256KB` 가드로 차단. 캡 도달 시 `…(미리보기 일부)` 표시. 세션당 캐시로 매 프레임 재읽기 방지.
+- 도구 호출/결과 블록은 `[도구 호출]`/`[도구 결과]`로 축약, text 블록만 본문 표시. 검색 모드에선 `p`가 쿼리 문자로 처리(미리보기는 Normal 모드 토글).
+
+### Safety
+- 미리보기는 **읽기 전용** — 원본 JSONL에 쓰기 0. SHA-256 불변 테스트(5개 픽스처 × read_preview 전후) 포함. 210KB 단일 줄 RAM 바운드 회귀 테스트로 스트리밍 한계 고정.
+
+### Tests
+- 미리보기 통합 테스트 13종(멀티턴 추출·캡 경계·거대 줄 바운드·null content·이모지/다국어·손상 줄 skip·SHA 불변) + 유닛 5종. 총 96 테스트(51 유닛 + 16 parser + 13 preview + 15 trash + 1 doctest 경로) 통과.
+
 ## [0.5.0] - 2026-06-25
 
 ### Added (M2 — 프로젝트 그룹핑 / 포지셔닝)
@@ -70,7 +83,8 @@
 ### Note
 - 코드 구현은 M0(기술 검증 스파이크)부터. 본 릴리스는 **기획·워크플로우 베이스라인**이다.
 
-[Unreleased]: https://github.com/Qnd1101/claudeDesk/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/Qnd1101/claudeDesk/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/Qnd1101/claudeDesk/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/Qnd1101/claudeDesk/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/Qnd1101/claudeDesk/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/Qnd1101/claudeDesk/compare/v0.2.0...v0.3.0
