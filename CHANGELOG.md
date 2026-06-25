@@ -5,6 +5,19 @@
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-06-25
+
+### Added (M2 일부 — 검색·정렬)
+- **검색(FR-05):** `/`로 검색 모드 진입, 제목·프로젝트(cwd) incremental 부분일치 필터(대소문자 무시), `Esc` 해제. 원본 불변(메모리 뷰 레이어).
+- **정렬(FR-07):** `s` 정렬 키 순환(수정/생성/제목/메시지수), `S` 방향 토글. 헤더에 현재 정렬 표시. 기본 수정 내림차순.
+- 도움말 오버레이·상태바 키힌트에 `/`·`s`·`S` 반영.
+
+### Fixed / Hardened
+- 엣지 픽스처+테스트 추가(§5.11): 이모지/다국어, 메타 64줄 초과(제목 탐색 포기 경계), `content:null` user 폴백 — 모두 원본 SHA 불변 세트 포함. (#5 FAIL-03 일부 해소)
+
+### Changed
+- 릴리스 워크플로우에서 macOS Intel(x86_64-apple-darwin) 타깃 제거 — 빌드 타깃: Windows / macOS(arm64) / Linux(musl).
+
 ## [0.2.0] - 2026-06-25
 
 ### Added (M1 MVP — 동작하는 첫 바이너리)
@@ -29,6 +42,7 @@
 ### Note
 - 코드 구현은 M0(기술 검증 스파이크)부터. 본 릴리스는 **기획·워크플로우 베이스라인**이다.
 
-[Unreleased]: https://github.com/Qnd1101/claudeDesk/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/Qnd1101/claudeDesk/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/Qnd1101/claudeDesk/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/Qnd1101/claudeDesk/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/Qnd1101/claudeDesk/releases/tag/v0.1.0

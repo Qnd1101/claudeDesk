@@ -30,7 +30,6 @@
 | :--- | :--- |
 | Windows (x64) | `claudedesk-vX.Y.Z-x86_64-pc-windows-msvc.zip` |
 | macOS (Apple Silicon) | `claudedesk-vX.Y.Z-aarch64-apple-darwin.tar.gz` |
-| macOS (Intel) | `claudedesk-vX.Y.Z-x86_64-apple-darwin.tar.gz` |
 | Linux (x64, static) | `claudedesk-vX.Y.Z-x86_64-unknown-linux-musl.tar.gz` |
 
 **Windows**
@@ -70,8 +69,12 @@ claudedesk
 | :--- | :--- |
 | `↑` / `k`, `↓` / `j` | 세션 이동 |
 | `Enter` | 선택 세션 **이어하기**(`claude --resume`) |
+| `/` | 검색 모드 (제목·프로젝트 incremental 필터) |
+| `s` | 정렬 키 순환 (수정/생성/제목/메시지수) |
+| `S` | 정렬 방향 토글 (↓/↑) |
 | `?` | 도움말 오버레이 |
-| `q` / `Esc` | 종료 |
+| `Esc` | 검색 모드 해제 (일반 모드에선 종료) |
+| `q` | 종료 |
 
 ### 동작 방식
 
