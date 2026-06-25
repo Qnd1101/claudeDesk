@@ -5,6 +5,17 @@
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-06-25
+
+### Added (M2 — 안전 삭제 / 휴지통)
+- **소프트 삭제(FR-04):** `Space` 다중 선택 → `Del`/`d` 삭제 확인 모달 → `~/.claude/claudedesk/trash/`로 **파일 이동**(내용 불변). 활성 세션은 차단.
+- **휴지통/복구(FR-11):** `T` 휴지통 화면 — `r` 복구(원본 경로 복귀), `D` 영구삭제. 복구 시 원본 경로 충돌은 rename 처리.
+- **영구삭제 안전 게이트:** purge는 `"DELETE"` 타이핑 + Enter 2단계 확인에서만 실행. **자동/보관기간 만료 purge 없음**(안전핀 §9.3).
+- 휴지통 인덱스(복구 메타) 원자적(temp+rename) 쓰기. 도움말/상태바 키힌트 갱신.
+
+### Safety
+- 원본 JSONL은 `fs::rename`(이동)만 — 내용 쓰기 0. SHA 불변 테스트 5종 포함, trash 통합 테스트 15종.
+
 ## [0.3.0] - 2026-06-25
 
 ### Added (M2 일부 — 검색·정렬)
@@ -42,7 +53,8 @@
 ### Note
 - 코드 구현은 M0(기술 검증 스파이크)부터. 본 릴리스는 **기획·워크플로우 베이스라인**이다.
 
-[Unreleased]: https://github.com/Qnd1101/claudeDesk/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/Qnd1101/claudeDesk/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/Qnd1101/claudeDesk/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/Qnd1101/claudeDesk/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/Qnd1101/claudeDesk/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/Qnd1101/claudeDesk/releases/tag/v0.1.0

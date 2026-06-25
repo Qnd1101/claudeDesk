@@ -1,13 +1,15 @@
 use ratatui::{
-    layout::{Alignment, Constraint, Direction, Layout, Rect},
+    layout::Alignment,
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Clear, Paragraph},
     Frame,
 };
 
+use super::layout::centered_rect;
+
 pub fn render_help(f: &mut Frame) {
-    let area = centered_rect(52, 22, f.area());
+    let area = centered_rect(58, 30, f.area());
 
     f.render_widget(Clear, area);
 
@@ -62,6 +64,35 @@ pub fn render_help(f: &mut Frame) {
             Span::raw("정렬 방향 토글  ↓(내림차순) ↔ ↑(오름차순)"),
         ]),
         Line::from(""),
+        // 다중선택 + 삭제 (FR-04)
+        Line::from(vec![
+            Span::styled("  Space", Style::default().fg(Color::Red)),
+            Span::raw("  다중선택 토글 (✓ 마커)"),
+        ]),
+        Line::from(vec![
+            Span::styled("  a    ", Style::default().fg(Color::Red)),
+            Span::raw("  전체선택/해제 토글"),
+        ]),
+        Line::from(vec![
+            Span::styled("  Del/d", Style::default().fg(Color::Red)),
+            Span::raw("  삭제 확인 모달 → 휴지통 이동"),
+        ]),
+        Line::from(""),
+        // 휴지통 (FR-11)
+        Line::from(vec![
+            Span::styled("  T    ", Style::default().fg(Color::Yellow)),
+            Span::raw("휴지통 화면 열기"),
+        ]),
+        Line::from(vec![
+            Span::raw("  [휴지통] "),
+            Span::styled("r", Style::default().fg(Color::Green)),
+            Span::raw(" 복구  "),
+            Span::styled("D", Style::default().fg(Color::Red)),
+            Span::raw(" 영구삭제(2단계)  "),
+            Span::styled("Esc", Style::default().fg(Color::DarkGray)),
+            Span::raw(" 닫기"),
+        ]),
+        Line::from(""),
         Line::from(vec![
             Span::styled("  ?    ", Style::default().fg(Color::Cyan)),
             Span::raw("도움말 토글        "),
@@ -72,11 +103,6 @@ pub fn render_help(f: &mut Frame) {
             Span::styled("  Ctrl+C ", Style::default().fg(Color::Red)),
             Span::raw("강제 종료"),
         ]),
-        Line::from(""),
-        Line::from(vec![Span::styled(
-            "  [M2 예정] Space 선택  Del 삭제  g 그룹",
-            Style::default().fg(Color::DarkGray),
-        )]),
         Line::from(""),
         Line::from(vec![Span::styled(
             "  Esc / ? 로 닫기",
@@ -91,31 +117,4 @@ pub fn render_help(f: &mut Frame) {
         .alignment(Alignment::Left);
 
     f.render_widget(paragraph, area);
-}
-
-/// 중앙 정렬 Rect (width, height in lines)
-fn centered_rect(width: u16, height: u16, area: Rect) -> Rect {
-    let popup_width = width.min(area.width);
-    let popup_height = height.min(area.height);
-
-    // Layout을 이용해 수직/수평 중앙
-    let vertical = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Length((area.height.saturating_sub(popup_height)) / 2),
-            Constraint::Length(popup_height),
-            Constraint::Min(0),
-        ])
-        .split(area);
-
-    let horizontal = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([
-            Constraint::Length((area.width.saturating_sub(popup_width)) / 2),
-            Constraint::Length(popup_width),
-            Constraint::Min(0),
-        ])
-        .split(vertical[1]);
-
-    horizontal[1]
 }
