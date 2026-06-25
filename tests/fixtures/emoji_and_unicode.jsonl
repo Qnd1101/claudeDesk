@@ -1,0 +1,4 @@
+{"type":"agent-setting","sessionId":"eeee1111-eeee-eeee-eeee-eeee11111111","agentSetting":{}}
+{"type":"user","sessionId":"eeee1111-eeee-eeee-eeee-eeee11111111","timestamp":"2026-06-25T10:00:00Z","cwd":"/home/synth/emoji-project","message":{"role":"user","content":"🚀 이모지 포함 첫 프롬프트 — 빌드 시작 🎉"},"uuid":"ee01","parentUuid":null}
+{"type":"assistant","sessionId":"eeee1111-eeee-eeee-eeee-eeee11111111","timestamp":"2026-06-25T10:00:01Z","cwd":"/home/synth/emoji-project","message":{"role":"assistant","content":"✅ 처리 완료! 결과를 확인하세요. 🔍"}}
+{"type":"user","sessionId":"eeee1111-eeee-eeee-eeee-eeee11111111","timestamp":"2026-06-25T10:00:02Z","cwd":"/home/synth/emoji-project","message":{"role":"user","content":"🌏 다국어: こんにちは 안녕하세요 Héllo Wörld"},"uuid":"ee02","parentUuid":"ee01"}

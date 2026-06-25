@@ -10,8 +10,7 @@ pub struct Session {
     pub title: String,
     /// 작업 디렉토리 (레코드 cwd 필드 우선, 없으면 폴더명 역치환)
     pub cwd: String,
-    /// 생성시각 (첫 timestamp, 없으면 파일 ctime). M2 정렬(FR-07)에서 사용 예정.
-    #[allow(dead_code)]
+    /// 생성시각 (첫 timestamp, 없으면 파일 ctime). FR-07 정렬(created key)에 사용.
     pub created: SystemTime,
     /// 최종수정시각 (파일 mtime)
     pub modified: SystemTime,
@@ -25,6 +24,8 @@ pub struct Session {
     /// 파싱 중 스킵된 줄 수(세션별 진단). 현재는 집계 stats로 표시.
     #[allow(dead_code)]
     pub skipped_lines: usize,
+    /// 검색 대상 텍스트: title + cwd 결합 (FR-05 incremental 필터용)
+    pub search_text: String,
 }
 
 impl Session {
