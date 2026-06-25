@@ -28,9 +28,14 @@ pub struct Session {
     pub search_text: String,
 }
 
+/// cwd 문자열에서 마지막 경로 세그먼트를 반환 (/ 또는 \\ 분리)
+pub fn project_name_of(cwd: &str) -> &str {
+    cwd.rsplit(['/', '\\']).next().unwrap_or(cwd)
+}
+
 impl Session {
     /// 표시용 프로젝트명: cwd 마지막 세그먼트
     pub fn project_name(&self) -> &str {
-        self.cwd.rsplit(['/', '\\']).next().unwrap_or(&self.cwd)
+        project_name_of(&self.cwd)
     }
 }
