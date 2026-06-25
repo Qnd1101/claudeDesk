@@ -2,6 +2,7 @@ mod config;
 mod data;
 mod domain;
 mod parser;
+mod preview;
 mod service;
 mod trash;
 mod ui;

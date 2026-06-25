@@ -102,6 +102,12 @@ pub fn render_help(f: &mut Frame) {
             Span::raw("현재 그룹 접기/펼치기 토글"),
         ]),
         Line::from(""),
+        // 미리보기 (FR-08)
+        Line::from(vec![
+            Span::styled("  p    ", Style::default().fg(Color::Cyan)),
+            Span::raw("미리보기 패널 토글 (≥100칸 필요, Normal 모드 전용)"),
+        ]),
+        Line::from(""),
         Line::from(vec![
             Span::styled("  ?    ", Style::default().fg(Color::Cyan)),
             Span::raw("도움말 토글        "),

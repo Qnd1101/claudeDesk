@@ -8,14 +8,23 @@ use ratatui::{
 use std::collections::HashSet;
 use unicode_width::UnicodeWidthStr;
 
+use crate::preview::PreviewContent;
 use crate::service::{AppState, DisplayRow};
 
+use super::preview::render_preview;
 use super::time::relative_time;
+
+/// 미리보기 패널을 활성화하기 위한 최소 터미널 폭(칸)
+pub const PREVIEW_MIN_WIDTH: u16 = 100;
 
 /// 메인 리스트 렌더.
 /// - `search_mode`: true이면 검색 입력바 추가 렌더.
 /// - `selected_ids`: 다중선택된 session_id 집합 (✓ 마커 표시용).
 /// - `status_message`: 작업 결과 임시 메시지 (None이면 기본 키힌트).
+/// - `preview_open`: 미리보기 패널 열림 여부.
+/// - `preview_content`: 미리보기 내용 (None이면 미리보기 미렌더).
+/// - `preview_title`: 미리보기 패널 타이틀에 쓸 세션 제목.
+#[allow(clippy::too_many_arguments)]
 pub fn render_list(
     f: &mut Frame,
     state: &AppState,
@@ -23,8 +32,28 @@ pub fn render_list(
     search_mode: bool,
     selected_ids: &HashSet<String>,
     status_message: Option<&str>,
+    preview_open: bool,
+    preview_content: Option<&PreviewContent>,
+    preview_title: &str,
 ) {
-    let area = f.area();
+    let full_area = f.area();
+
+    // ── FR-08: 가로 분할 (폭 가드) ───────────────────────────────────────
+    // preview_open이고 실제 폭이 PREVIEW_MIN_WIDTH 이상일 때만 분할.
+    // 한번 열린 뒤 터미널이 좁아져도 패닉 없이 리스트만 렌더.
+    let (list_area, preview_area_opt) =
+        if preview_open && full_area.width >= PREVIEW_MIN_WIDTH && preview_content.is_some() {
+            // 60% 리스트 / 40% 미리보기
+            let chunks = Layout::default()
+                .direction(Direction::Horizontal)
+                .constraints([Constraint::Percentage(60), Constraint::Percentage(40)])
+                .split(full_area);
+            (chunks[0], Some(chunks[1]))
+        } else {
+            (full_area, None)
+        };
+
+    let area = list_area;
 
     // 레이아웃: 헤더 1줄 + [검색바 1줄 if search_mode] + 테이블 본문 + 상태바 1줄
     let constraints = if search_mode {
@@ -148,6 +177,7 @@ pub fn render_list(
             search_mode,
             selected_ids,
             status_message,
+            preview_open && preview_area_opt.is_some(),
         );
         return;
     }
@@ -170,6 +200,7 @@ pub fn render_list(
             search_mode,
             selected_ids,
             status_message,
+            preview_open && preview_area_opt.is_some(),
         );
         return;
     }
@@ -310,7 +341,13 @@ pub fn render_list(
         search_mode,
         selected_ids,
         status_message,
+        preview_open && preview_area_opt.is_some(),
     );
+
+    // ── FR-08: 미리보기 패널 렌더 ────────────────────────────────────────
+    if let (Some(preview_area), Some(content)) = (preview_area_opt, preview_content) {
+        render_preview(f, preview_area, content, preview_title);
+    }
 }
 
 fn build_header_cells(show_project: bool, show_msgs: bool) -> Vec<Cell<'static>> {
@@ -340,6 +377,7 @@ fn build_widths(show_project: bool, show_msgs: bool) -> Vec<Constraint> {
     constraints
 }
 
+#[allow(clippy::too_many_arguments)]
 fn render_statusbar(
     f: &mut Frame,
     area: ratatui::layout::Rect,
@@ -348,6 +386,7 @@ fn render_statusbar(
     search_mode: bool,
     selected_ids: &HashSet<String>,
     status_message: Option<&str>,
+    preview_active: bool,
 ) {
     let mut spans = vec![];
 
@@ -381,6 +420,14 @@ fn render_statusbar(
     ));
     spans.push(Span::raw("| "));
 
+    // 미리보기 활성 표시
+    if preview_active {
+        spans.push(Span::styled(
+            "[미리보기] ",
+            Style::default().fg(Color::Cyan),
+        ));
+    }
+
     // 키 힌트
     if search_mode {
         spans.push(Span::styled(
@@ -401,7 +448,7 @@ fn render_statusbar(
         if state.grouped {
             hint.push_str("  Tab 접기/펼치기");
         }
-        hint.push_str("  Space 선택  a 전체선택  Del 삭제  T 휴지통  ? 도움말  q 종료");
+        hint.push_str("  p 미리보기  Space 선택  a 전체선택  Del 삭제  T 휴지통  ? 도움말  q 종료");
         spans.push(Span::styled(hint, Style::default().fg(Color::DarkGray)));
     }
 
