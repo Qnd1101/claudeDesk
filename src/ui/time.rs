@@ -1,6 +1,9 @@
+use chrono::{DateTime, Local};
 use std::time::{Duration, SystemTime};
 
-/// SystemTime → 상대시간 문자열 (한국어)
+use crate::config::TimeFormat;
+
+/// SystemTime → 상대시간 문자열 (한국어, TimeFormat::Relative용)
 pub fn relative_time(t: &SystemTime) -> String {
     let now = SystemTime::now();
     let diff = match now.duration_since(*t) {
@@ -26,6 +29,21 @@ pub fn relative_time(t: &SystemTime) -> String {
         format!("{}달 전", secs / (86400 * 30))
     } else {
         format!("{}년 전", secs / (86400 * 365))
+    }
+}
+
+/// SystemTime → 절대시간 문자열 로컬 타임존 (TimeFormat::Absolute용)
+/// 예: "2026-06-26 12:40"
+pub fn absolute_time(t: &SystemTime) -> String {
+    let dt: DateTime<Local> = (*t).into();
+    dt.format("%Y-%m-%d %H:%M").to_string()
+}
+
+/// TimeFormat에 따라 상대/절대 시간 중 선택해 반환.
+pub fn format_time(t: &SystemTime, fmt: TimeFormat) -> String {
+    match fmt {
+        TimeFormat::Relative => relative_time(t),
+        TimeFormat::Absolute => absolute_time(t),
     }
 }
 
@@ -67,5 +85,31 @@ mod tests {
     fn test_future_time() {
         let t = SystemTime::now() + Duration::from_secs(100);
         assert_eq!(relative_time(&t), "방금 전");
+    }
+
+    #[test]
+    fn test_absolute_time_format() {
+        // 특정 에포크 시각의 포맷 구조 검증 (로컬 타임존이므로 정확한 값은 환경 의존)
+        let t = SystemTime::UNIX_EPOCH + Duration::from_secs(1_750_000_000);
+        let s = absolute_time(&t);
+        // "YYYY-MM-DD HH:MM" 형식인지 확인
+        assert_eq!(s.len(), 16, "absolute_time 형식 길이 불일치: '{s}'");
+        assert!(s.contains('-'), "날짜 구분자 '-' 없음: '{s}'");
+        assert!(s.contains(':'), "시간 구분자 ':' 없음: '{s}'");
+    }
+
+    #[test]
+    fn test_format_time_relative() {
+        let t = SystemTime::now() - Duration::from_secs(130);
+        let s = format_time(&t, TimeFormat::Relative);
+        assert_eq!(s, "2분 전");
+    }
+
+    #[test]
+    fn test_format_time_absolute() {
+        let t = SystemTime::UNIX_EPOCH + Duration::from_secs(1_750_000_000);
+        let s = format_time(&t, TimeFormat::Absolute);
+        // 길이 + 구분자 확인 (로컬 타임존 의존 — 값 자체는 환경마다 다름)
+        assert_eq!(s.len(), 16, "absolute 형식 불일치: '{s}'");
     }
 }
