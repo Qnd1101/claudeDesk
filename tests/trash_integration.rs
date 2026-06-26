@@ -467,7 +467,7 @@ fn test_sort_and_filter_regression() {
         use claudedesk::parser::build_search_text;
         let now = SystemTime::now();
         let modified = now - Duration::from_secs(secs_ago);
-        let search_text = build_search_text(title, None, "/test");
+        let search_text = build_search_text(title, None, "/test", None);
         Session {
             session_id: title.to_string(),
             title: title.to_string(),
@@ -478,6 +478,7 @@ fn test_sort_and_filter_regression() {
             is_active: false,
             path: PathBuf::from("/test/session.jsonl"),
             skipped_lines: 0,
+            alias: None,
             search_text,
         }
     };
@@ -510,6 +511,7 @@ fn test_sort_and_filter_regression() {
         selected_ids: HashSet::new(),
         grouped: false,
         collapsed_projects: HashSet::new(),
+        aliases: claudedesk::alias::AliasStore::default(),
     };
     let idx = state.filtered_indices();
     assert_eq!(idx.len(), 1, "검색 결과가 1개여야 함");

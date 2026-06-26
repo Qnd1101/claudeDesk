@@ -24,7 +24,9 @@ pub struct Session {
     /// 파싱 중 스킵된 줄 수(세션별 진단). 현재는 집계 stats로 표시.
     #[allow(dead_code)]
     pub skipped_lines: usize,
-    /// 검색 대상 텍스트: title + cwd 결합 (FR-05 incremental 필터용)
+    /// 사용자 별칭 (FR-06, 사이드카 meta.json). None=미지정.
+    pub alias: Option<String>,
+    /// 검색 대상 텍스트: title + cwd + alias 결합 (FR-05·FR-06 incremental 필터용)
     pub search_text: String,
 }
 
@@ -37,5 +39,11 @@ impl Session {
     /// 표시용 프로젝트명: cwd 마지막 세그먼트
     pub fn project_name(&self) -> &str {
         project_name_of(&self.cwd)
+    }
+
+    /// 목록·미리보기 표시 제목: 별칭 우선, 없으면 도출 title (FR-06 부록 B 우선순위 1)
+    /// title 원본 보존 → 별칭 삭제 시 자동 복원.
+    pub fn display_title(&self) -> &str {
+        self.alias.as_deref().unwrap_or(&self.title)
     }
 }
