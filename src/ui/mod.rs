@@ -954,10 +954,11 @@ impl App {
                 self.mode = UiMode::Normal;
             }
             KeyCode::Char('s') => {
-                // 저장: draft → config 반영 + 파일 저장
-                self.config = self.settings_draft.clone();
-                match self.config.save() {
+                // 저장: 파일에 먼저 쓰고, 성공했을 때만 런타임 config 반영.
+                // (실패 시 self.config는 그대로 둬 파일과 런타임 상태가 어긋나지 않게)
+                match self.settings_draft.save() {
                     Ok(()) => {
+                        self.config = self.settings_draft.clone();
                         // default_sort 즉시 재정렬 반영 (다음 실행뿐 아니라 지금도 적용)
                         let new_sort = crate::service::SortState {
                             key: self.config.default_sort.key,
