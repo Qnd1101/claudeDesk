@@ -4,7 +4,7 @@ use std::process::Command;
 use crate::config::Config;
 use crate::data::discover_sessions;
 use crate::domain::Session;
-use crate::parser::{build_session, parse_session};
+use crate::parser::{build_search_text, build_session, parse_session};
 
 // ── 정렬 (FR-07) ─────────────────────────────────────────────────────────────
 
@@ -124,7 +124,7 @@ pub fn apply_sort(sessions: &mut [Session], sort: SortState) {
             sessions.sort_by(|a, b| dir_cmp(a.created.cmp(&b.created)));
         }
         SortKey::Title => {
-            sessions.sort_by(|a, b| dir_cmp(a.title.cmp(&b.title)));
+            sessions.sort_by(|a, b| dir_cmp(a.display_title().cmp(b.display_title())));
         }
         SortKey::Messages => {
             sessions.sort_by(|a, b| dir_cmp(a.msg_count.cmp(&b.msg_count)));
@@ -143,8 +143,12 @@ impl SessionService {
         Self { config }
     }
 
-    /// 세션 목록 빌드: 디스커버리 → 파싱 → 정렬 적용
-    pub fn load_sessions(&self, sort: SortState) -> Result<(Vec<Session>, ScanStats)> {
+    /// 세션 목록 빌드: 디스커버리 → 파싱 → 별칭 주입 → 정렬 적용
+    pub fn load_sessions(
+        &self,
+        sort: SortState,
+        aliases: &crate::alias::AliasStore,
+    ) -> Result<(Vec<Session>, ScanStats)> {
         let mut stats = ScanStats::default();
 
         let file_metas =
@@ -156,7 +160,11 @@ impl SessionService {
             match parse_session(meta) {
                 Ok(result) => {
                     stats.skipped_lines += result.skipped_lines;
-                    let session = build_session(meta, result, self.config.active_window_secs);
+                    // file_stem = session_id 로 별칭 조회 (parser가 alias 모듈 미의존 — 레이어 분리)
+                    let session_id = meta.path.file_stem().and_then(|s| s.to_str()).unwrap_or("");
+                    let alias = aliases.get(session_id);
+                    let session =
+                        build_session(meta, result, self.config.active_window_secs, alias);
                     sessions.push(session);
                 }
                 Err(e) => {
@@ -210,12 +218,16 @@ pub struct AppState {
     pub grouped: bool,
     /// 접힌 프로젝트 cwd 집합 (FR-09)
     pub collapsed_projects: std::collections::HashSet<String>,
+    /// 별칭 사이드카 (FR-06). 편집 시 메모리 갱신 + 즉시 save.
+    #[allow(dead_code)]
+    pub aliases: crate::alias::AliasStore,
 }
 
 impl AppState {
     pub fn build(service: &SessionService) -> Result<Self> {
+        let aliases = crate::alias::AliasStore::load();
         let sort = SortState::default();
-        let (sessions, stats) = service.load_sessions(sort)?;
+        let (sessions, stats) = service.load_sessions(sort, &aliases)?;
         Ok(AppState {
             sessions,
             stats,
@@ -225,6 +237,7 @@ impl AppState {
             selected_ids: std::collections::HashSet::new(),
             grouped: false,
             collapsed_projects: std::collections::HashSet::new(),
+            aliases,
         })
     }
 
@@ -341,6 +354,27 @@ impl AppState {
             }
         }
     }
+
+    /// 별칭 설정 + 사이드카 원자적 저장 + 해당 세션 메모리 갱신 (FR-06).
+    /// first_user_raw는 메모리에 없으므로 None으로 재조립 (의도적 트레이드오프 — plan §3.5).
+    #[allow(dead_code)]
+    pub fn set_alias(&mut self, session_id: &str, new_alias: &str) -> anyhow::Result<()> {
+        self.aliases.set(session_id, new_alias);
+        self.aliases.save()?;
+        // 소유권 충돌 방지: get 결과를 String으로 복사한 뒤 세션 갱신
+        let alias_val = self.aliases.get(session_id).map(|s| s.to_string());
+        if let Some(s) = self
+            .sessions
+            .iter_mut()
+            .find(|s| s.session_id == session_id)
+        {
+            let title = s.title.clone();
+            let cwd = s.cwd.clone();
+            s.alias = alias_val.clone();
+            s.search_text = build_search_text(&title, None, &cwd, alias_val.as_deref());
+        }
+        Ok(())
+    }
 }
 
 // ── resume ────────────────────────────────────────────────────────────────────
@@ -442,7 +476,7 @@ mod tests {
         let now = SystemTime::now();
         let modified = now - Duration::from_secs(modified_secs_ago);
         let created = modified;
-        let search_text = build_search_text(title, first_user_raw, "/test");
+        let search_text = build_search_text(title, first_user_raw, "/test", None);
         Session {
             session_id: title.to_string(),
             title: title.to_string(),
@@ -453,6 +487,7 @@ mod tests {
             is_active: false,
             path: PathBuf::from("/test"),
             skipped_lines: 0,
+            alias: None,
             search_text,
         }
     }
@@ -561,6 +596,7 @@ mod tests {
             selected_ids: std::collections::HashSet::new(),
             grouped: false,
             collapsed_projects: std::collections::HashSet::new(),
+            aliases: crate::alias::AliasStore::default(),
         };
         let idx = state.filtered_indices();
         assert_eq!(idx, vec![0, 1]);
@@ -581,6 +617,7 @@ mod tests {
             selected_ids: std::collections::HashSet::new(),
             grouped: false,
             collapsed_projects: std::collections::HashSet::new(),
+            aliases: crate::alias::AliasStore::default(),
         };
         let idx = state.filtered_indices();
         assert_eq!(idx, vec![0, 2]);
@@ -600,6 +637,7 @@ mod tests {
             selected_ids: std::collections::HashSet::new(),
             grouped: false,
             collapsed_projects: std::collections::HashSet::new(),
+            aliases: crate::alias::AliasStore::default(),
         };
         let idx = state.filtered_indices();
         assert_eq!(idx, vec![0]);
@@ -622,7 +660,7 @@ mod tests {
         let now = SystemTime::now();
         let modified = now - Duration::from_secs(modified_secs_ago);
         let created = modified;
-        let search_text = build_search_text(title, None, cwd);
+        let search_text = build_search_text(title, None, cwd, None);
         Session {
             session_id: title.to_string(),
             title: title.to_string(),
@@ -633,6 +671,7 @@ mod tests {
             is_active: false,
             path: PathBuf::from(cwd),
             skipped_lines: 0,
+            alias: None,
             search_text,
         }
     }
@@ -648,6 +687,7 @@ mod tests {
             selected_ids: std::collections::HashSet::new(),
             grouped: false,
             collapsed_projects: std::collections::HashSet::new(),
+            aliases: crate::alias::AliasStore::default(),
         };
         let rows = state.display_rows();
         assert_eq!(rows, vec![DisplayRow::Session(0), DisplayRow::Session(1)]);
@@ -667,6 +707,7 @@ mod tests {
             selected_ids: std::collections::HashSet::new(),
             grouped: true,
             collapsed_projects: std::collections::HashSet::new(),
+            aliases: crate::alias::AliasStore::default(),
         };
         let rows = state.display_rows();
         // alpha (100 secs ago) is more recent -> alpha first
@@ -699,6 +740,7 @@ mod tests {
             selected_ids: std::collections::HashSet::new(),
             grouped: true,
             collapsed_projects: collapsed,
+            aliases: crate::alias::AliasStore::default(),
         };
         let rows = state.display_rows();
         assert_eq!(rows.len(), 3);
@@ -741,6 +783,7 @@ mod tests {
             selected_ids: std::collections::HashSet::new(),
             grouped: true,
             collapsed_projects: std::collections::HashSet::new(),
+            aliases: crate::alias::AliasStore::default(),
         };
         let rows = state.display_rows();
         match &rows[0] {
@@ -763,6 +806,7 @@ mod tests {
             selected_ids: std::collections::HashSet::new(),
             grouped: true,
             collapsed_projects: std::collections::HashSet::new(),
+            aliases: crate::alias::AliasStore::default(),
         };
         let rows = state.display_rows();
         assert_eq!(rows.len(), 2);
@@ -799,6 +843,7 @@ mod tests {
             selected_ids: std::collections::HashSet::new(),
             grouped: false,
             collapsed_projects: std::collections::HashSet::new(),
+            aliases: crate::alias::AliasStore::default(),
         };
         let idx = state.filtered_indices();
         assert_eq!(
@@ -829,6 +874,7 @@ mod tests {
             selected_ids,
             grouped: true,
             collapsed_projects: std::collections::HashSet::new(),
+            aliases: crate::alias::AliasStore::default(),
         }
     }
 
