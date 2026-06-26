@@ -67,6 +67,7 @@ Claude Code 세션 관리자 TUI
 키 바인딩:
   ↑/k  위로 이동       ↓/j  아래로 이동
   Enter  세션 이어하기  q/Esc  종료
+  n    별칭 지정/편집 (빈칸 저장=삭제)
   ?    도움말 오버레이
 ",
         ver = env!("CARGO_PKG_VERSION")
