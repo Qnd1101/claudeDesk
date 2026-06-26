@@ -470,7 +470,7 @@ fn render_statusbar(
         if state.grouped {
             hint.push_str("  Tab 접기/펼치기");
         }
-        hint.push_str("  p 미리보기  Space 선택  a 전체선택  Del 삭제  T 휴지통  ? 도움말  q 종료");
+        hint.push_str("  p 미리보기  Space 선택  a 전체선택  o 오래된선택  Del 삭제  T 휴지통  ? 도움말  q 종료");
         spans.push(Span::styled(hint, Style::default().fg(Color::DarkGray)));
     }
 

@@ -354,6 +354,28 @@ impl AppState {
         }
     }
 
+    /// FR-14: cutoff 시각보다 이전에 수정된, 현재 필터에 보이는 비활성 세션 id 목록.
+    /// 활성 세션(최근 수정 휴리스틱)은 정의상 cutoff 이후라 빠지지만 방어적으로 `!is_active` 가드.
+    /// 검색 필터(filtered_indices) 범위에서만 동작 — `a`(전체선택)와 동일 스코프.
+    pub fn older_than_ids(&self, cutoff: std::time::SystemTime) -> Vec<String> {
+        self.filtered_indices()
+            .iter()
+            .filter_map(|&i| self.sessions.get(i))
+            .filter(|s| !s.is_active && s.modified < cutoff)
+            .map(|s| s.session_id.clone())
+            .collect()
+    }
+
+    /// FR-14: cutoff 이전 비활성 세션을 selected_ids에 추가(기존 선택은 보존).
+    /// 반환: 대상 세션 수. 삭제는 하지 않는다 — 기존 `d`→삭제확인 흐름으로 위임(안전핀).
+    pub fn select_older_than(&mut self, cutoff: std::time::SystemTime) -> usize {
+        let ids = self.older_than_ids(cutoff);
+        for id in &ids {
+            self.selected_ids.insert(id.clone());
+        }
+        ids.len()
+    }
+
     /// 별칭 설정 + 사이드카 원자적 저장 + 해당 세션 메모리 갱신 (FR-06).
     /// first_user_raw는 메모리에 없으므로 None으로 재조립 (의도적 트레이드오프 — plan §3.5).
     pub fn set_alias(&mut self, session_id: &str, new_alias: &str) -> anyhow::Result<()> {
@@ -1006,5 +1028,82 @@ mod tests {
             state.selected_ids.contains("Python B"),
             "숨겨진 Python B는 구 버전처럼 같이 해제되면 안 됨 (BUG-01 핵심)"
         );
+    }
+
+    // ── FR-14: 날짜 기준 오래된 세션 선택 ────────────────────────────────────
+
+    const DAY: u64 = 86_400;
+
+    /// 평면 모드 기본 AppState (검색 없음, 선택 없음)
+    fn plain_state(sessions: Vec<Session>) -> AppState {
+        AppState {
+            sessions,
+            stats: ScanStats::default(),
+            projects_root: PathBuf::from("/tmp"),
+            sort: SortState::default(),
+            search_query: None,
+            selected_ids: std::collections::HashSet::new(),
+            grouped: false,
+            collapsed_projects: std::collections::HashSet::new(),
+            aliases: crate::alias::AliasStore::default(),
+        }
+    }
+
+    /// cutoff(30일 전) 이전 세션만 대상이 되고, 최근 세션은 빠진다.
+    #[test]
+    fn test_older_than_ids_selects_only_old() {
+        let state = plain_state(vec![
+            make_session("old", 100 * DAY, 1),   // 100일 전 → 대상
+            make_session("recent", 10 * DAY, 1), // 10일 전 → 제외
+        ]);
+        let cutoff = SystemTime::now() - Duration::from_secs(30 * DAY);
+        let ids = state.older_than_ids(cutoff);
+        assert_eq!(ids, vec!["old"]);
+    }
+
+    /// 활성 세션은 cutoff 이전이라도 방어적으로 제외된다.
+    #[test]
+    fn test_older_than_ids_excludes_active() {
+        let mut active = make_session("active-old", 100 * DAY, 1);
+        active.is_active = true; // 비정상 케이스(오래됐는데 활성) — 그래도 제외돼야
+        let state = plain_state(vec![active, make_session("dead-old", 100 * DAY, 1)]);
+        let cutoff = SystemTime::now() - Duration::from_secs(30 * DAY);
+        let ids = state.older_than_ids(cutoff);
+        assert_eq!(ids, vec!["dead-old"], "활성 세션이 선택 대상에 포함됨");
+    }
+
+    /// select_older_than은 selected_ids에 추가하고 기존 선택을 보존한다(삭제는 안 함).
+    #[test]
+    fn test_select_older_than_adds_and_preserves() {
+        let mut state = plain_state(vec![
+            make_session("old1", 90 * DAY, 1),
+            make_session("old2", 60 * DAY, 1),
+            make_session("recent", 5 * DAY, 1),
+        ]);
+        state.selected_ids.insert("recent".to_string()); // 기존 선택 보존돼야
+        let cutoff = SystemTime::now() - Duration::from_secs(30 * DAY);
+        let n = state.select_older_than(cutoff);
+        assert_eq!(n, 2, "30일 이전 2개가 대상이어야");
+        assert!(state.selected_ids.contains("old1"));
+        assert!(state.selected_ids.contains("old2"));
+        assert!(
+            state.selected_ids.contains("recent"),
+            "기존 선택(recent)이 보존돼야"
+        );
+        // 세션 목록은 변하지 않음(삭제 아님)
+        assert_eq!(state.sessions.len(), 3);
+    }
+
+    /// 검색 필터가 켜져 있으면 보이는(매칭) 세션 중에서만 대상이 잡힌다.
+    #[test]
+    fn test_older_than_ids_respects_search_filter() {
+        let mut state = plain_state(vec![
+            make_session("docker-old", 100 * DAY, 1),
+            make_session("python-old", 100 * DAY, 1),
+        ]);
+        state.search_query = Some("docker".to_string());
+        let cutoff = SystemTime::now() - Duration::from_secs(30 * DAY);
+        let ids = state.older_than_ids(cutoff);
+        assert_eq!(ids, vec!["docker-old"], "검색에 가려진 세션은 대상 제외");
     }
 }
