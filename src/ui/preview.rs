@@ -13,7 +13,14 @@ use crate::preview::PreviewContent;
 ///
 /// - `content`: `read_preview`가 반환한 대화 내용
 /// - `session_title`: 패널 상단 타이틀에 표시할 세션 제목(짧게 잘라 사용)
-pub fn render_preview(f: &mut Frame, area: Rect, content: &PreviewContent, session_title: &str) {
+/// - `session_path`: 세션이 실행된 작업 디렉토리(cwd) 전체 경로. 빈 문자열이면 생략(①).
+pub fn render_preview(
+    f: &mut Frame,
+    area: Rect,
+    content: &PreviewContent,
+    session_title: &str,
+    session_path: &str,
+) {
     // 타이틀: "Preview — 세션제목(최대 20자)" 형식
     let short_title = truncate_title(session_title, 20);
     let block_title = if short_title.is_empty() {
@@ -22,24 +29,47 @@ pub fn render_preview(f: &mut Frame, area: Rect, content: &PreviewContent, sessi
         format!(" Preview — {} ", short_title)
     };
 
+    // ① 풀 경로 메타 헤더: 세션이 어느 폴더에서 실행됐는지 한눈에.
+    //    Wrap(trim:false)로 긴 경로도 잘리지 않고 줄바꿈 표시.
+    let path_header: Vec<Line> = if session_path.is_empty() {
+        Vec::new()
+    } else {
+        vec![
+            Line::from(vec![Span::styled(
+                session_path.to_string(),
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD),
+            )]),
+            Line::from(""),
+        ]
+    };
+
     // turns가 비어 있는 경우 (빈 파일, 그룹 헤더 커서 등)
     if content.turns.is_empty() {
-        let msg = "미리보기 없음\n(세션에 대화 내용이 없습니다)";
-        let p = Paragraph::new(msg)
+        let mut lines = path_header;
+        lines.push(Line::from(vec![Span::styled(
+            "미리보기 없음",
+            Style::default().fg(Color::DarkGray),
+        )]));
+        lines.push(Line::from(vec![Span::styled(
+            "(세션에 대화 내용이 없습니다)",
+            Style::default().fg(Color::DarkGray),
+        )]));
+        let p = Paragraph::new(lines)
             .block(
                 Block::default()
                     .borders(Borders::ALL)
                     .title(block_title)
                     .border_style(Style::default().fg(Color::DarkGray)),
             )
-            .style(Style::default().fg(Color::DarkGray))
             .wrap(Wrap { trim: false });
         f.render_widget(p, area);
         return;
     }
 
-    // 대화 턴을 Line 목록으로 변환
-    let mut lines: Vec<Line> = vec![];
+    // 대화 턴을 Line 목록으로 변환 (경로 헤더 먼저)
+    let mut lines: Vec<Line> = path_header;
 
     for (i, turn) in content.turns.iter().enumerate() {
         // 턴 구분 빈 줄 (첫 턴 제외)

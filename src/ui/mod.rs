@@ -204,6 +204,7 @@ impl App {
                         UiMode::DeleteConfirm => {
                             let preview_content = self.current_preview_content();
                             let preview_title = self.current_session_title();
+                            let preview_path = self.current_session_cwd();
                             render_list(
                                 f,
                                 &self.state,
@@ -214,6 +215,7 @@ impl App {
                                 self.preview_open,
                                 preview_content,
                                 &preview_title,
+                                &preview_path,
                             );
                             let data = DeleteConfirmData {
                                 titles: &self.delete_titles,
@@ -233,6 +235,7 @@ impl App {
                         UiMode::AliasEdit => {
                             let preview_content = self.current_preview_content();
                             let preview_title = self.current_session_title();
+                            let preview_path = self.current_session_cwd();
                             render_list(
                                 f,
                                 &self.state,
@@ -243,6 +246,7 @@ impl App {
                                 self.preview_open,
                                 preview_content,
                                 &preview_title,
+                                &preview_path,
                             );
                             let data = AliasEditData {
                                 original_title: &self.alias_target_title,
@@ -254,6 +258,7 @@ impl App {
                             let search_mode = self.mode == UiMode::Search;
                             let preview_content = self.current_preview_content();
                             let preview_title = self.current_session_title();
+                            let preview_path = self.current_session_cwd();
                             render_list(
                                 f,
                                 &self.state,
@@ -264,6 +269,7 @@ impl App {
                                 self.preview_open,
                                 preview_content,
                                 &preview_title,
+                                &preview_path,
                             );
                         }
                     }
@@ -1073,6 +1079,14 @@ impl App {
     fn current_session_title(&self) -> String {
         self.current_session()
             .map(|s| s.display_title().to_string())
+            .unwrap_or_default()
+    }
+
+    /// 현재 세션의 작업 디렉토리(cwd) 전체 경로 반환 (미리보기 경로 헤더용 ①).
+    /// 그룹 헤더 커서 등 세션이 아닐 땐 빈 문자열.
+    fn current_session_cwd(&self) -> String {
+        self.current_session()
+            .map(|s| s.cwd.clone())
             .unwrap_or_default()
     }
 }
