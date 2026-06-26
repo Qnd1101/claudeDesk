@@ -273,10 +273,16 @@ pub fn render_list(
                         (false, false, false) => "  ",
                     };
 
+                    // FR-06: display_title() 우선 + 별칭 마커 (§5.7: 텍스트 마커 필수)
+                    let display = session.display_title();
+                    let has_alias = session.alias.is_some();
+                    let alias_marker = if has_alias { "~ " } else { "" };
                     let title_text = if state.grouped {
-                        format!("  {}", safe_truncate(&session.title, 38))
+                        let trunc_w = if has_alias { 36 } else { 38 };
+                        format!("  {}{}", alias_marker, safe_truncate(display, trunc_w))
                     } else {
-                        safe_truncate(&session.title, 40)
+                        let trunc_w = if has_alias { 38 } else { 40 };
+                        format!("{}{}", alias_marker, safe_truncate(display, trunc_w))
                     };
 
                     let modified = relative_time(&session.modified);
@@ -444,7 +450,7 @@ fn render_statusbar(
             Style::default().fg(Color::Cyan),
         ));
     } else {
-        let mut hint = " ↑↓/jk 이동  Enter 이어하기  / 검색  s 정렬  g 그룹".to_string();
+        let mut hint = " ↑↓/jk 이동  Enter 이어하기  n 별칭  / 검색  s 정렬  g 그룹".to_string();
         if state.grouped {
             hint.push_str("  Tab 접기/펼치기");
         }

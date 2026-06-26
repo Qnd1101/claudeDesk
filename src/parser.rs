@@ -177,13 +177,23 @@ fn truncate_title(text: &str) -> String {
     }
 }
 
-/// 검색 대상 텍스트 조립: title + first_user_raw(있으면) + cwd 소문자 결합 (FR-05)
+/// 검색 대상 텍스트 조립: title + first_user_raw(있으면) + cwd + alias 소문자 결합 (FR-05·FR-06)
 /// `search_text` 구성 로직의 단일 진실원본 — build_session과 테스트 헬퍼가 공유.
-pub fn build_search_text(title: &str, first_user_raw: Option<&str>, cwd: &str) -> String {
-    match first_user_raw {
-        Some(raw) if raw != title => format!("{} {} {}", title, raw, cwd).to_lowercase(),
-        _ => format!("{} {}", title, cwd).to_lowercase(),
+pub fn build_search_text(
+    title: &str,
+    first_user_raw: Option<&str>,
+    cwd: &str,
+    alias: Option<&str>,
+) -> String {
+    let mut base = match first_user_raw {
+        Some(raw) if raw != title => format!("{} {} {}", title, raw, cwd),
+        _ => format!("{} {}", title, cwd),
+    };
+    if let Some(a) = alias.filter(|a| !a.is_empty()) {
+        base.push(' ');
+        base.push_str(a);
     }
+    base.to_lowercase()
 }
 
 /// FileMeta + ParseResult → Session 조립
@@ -191,6 +201,7 @@ pub fn build_session(
     file_meta: &FileMeta,
     result: ParseResult,
     active_window_secs: u64,
+    alias: Option<&str>,
 ) -> Session {
     let session_id = file_meta
         .path
@@ -216,8 +227,9 @@ pub fn build_session(
     // 활성 세션 판정: mtime이 now - active_window_secs 이내
     let is_active = is_recently_modified(&file_meta.mtime, active_window_secs);
 
-    // 검색 대상 텍스트: 공용 함수로 조립 (FR-05)
-    let search_text = build_search_text(&result.title, result.first_user_raw.as_deref(), &cwd);
+    // 검색 대상 텍스트: 공용 함수로 조립 (FR-05·FR-06)
+    let search_text =
+        build_search_text(&result.title, result.first_user_raw.as_deref(), &cwd, alias);
 
     Session {
         session_id,
@@ -229,6 +241,7 @@ pub fn build_session(
         is_active,
         path: file_meta.path.clone(),
         skipped_lines: result.skipped_lines,
+        alias: alias.map(|s| s.to_string()),
         search_text,
     }
 }
@@ -297,5 +310,27 @@ mod tests {
     fn test_truncate_title_multiline() {
         let t = truncate_title("\n\n첫 번째 줄\n두 번째 줄");
         assert_eq!(t, "첫 번째 줄");
+    }
+
+    #[test]
+    fn test_build_search_text_includes_alias() {
+        // 별칭이 소문자로 search_text에 결합되는지 확인
+        let result = build_search_text("My Session", None, "/proj/app", Some("결제 모듈"));
+        assert!(
+            result.contains("결제 모듈"),
+            "별칭이 search_text에 포함되지 않음: {result}"
+        );
+        assert!(
+            result.contains("my session"),
+            "title이 소문자로 포함되지 않음: {result}"
+        );
+
+        // 빈 별칭은 결합 안 됨
+        let result_no_alias = build_search_text("My Session", None, "/proj", None);
+        let result_empty_alias = build_search_text("My Session", None, "/proj", Some(""));
+        assert_eq!(
+            result_no_alias, result_empty_alias,
+            "빈 별칭이 search_text에 영향을 줌"
+        );
     }
 }

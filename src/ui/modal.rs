@@ -1,4 +1,4 @@
-/// 삭제 확인 모달 (FR-04, §2.4) + purge 2단계 확인 모달 (FR-11)
+/// 삭제 확인 모달 (FR-04, §2.4) + purge 2단계 확인 모달 (FR-11) + 별칭 편집 모달 (FR-06)
 use ratatui::{
     layout::Alignment,
     style::{Color, Modifier, Style},
@@ -198,6 +198,68 @@ pub fn render_purge_confirm(f: &mut Frame, data: &PurgeConfirmData<'_>) {
         Span::styled("[Esc] 취소", Style::default().fg(Color::DarkGray)),
     ]));
     lines.push(Line::from(""));
+
+    let para = Paragraph::new(lines).alignment(Alignment::Left);
+    f.render_widget(para, inner);
+}
+
+// ── 별칭 편집 모달 (FR-06) ──────────────────────────────────────────────────
+
+/// 별칭 편집 모달에 전달할 데이터
+pub struct AliasEditData<'a> {
+    /// 세션 원본 제목 (별칭 편집 전 표시용)
+    pub original_title: &'a str,
+    /// 현재 입력 중인 별칭 문자열
+    pub input: &'a str,
+}
+
+/// 별칭 지정/편집 모달 렌더 (FR-06 §3.6)
+/// Enter = 저장 (빈칸 = 별칭 삭제), Esc = 취소
+pub fn render_alias_edit(f: &mut Frame, data: &AliasEditData<'_>) {
+    let height = 9u16;
+    let area = centered_rect(60, height, f.area());
+
+    f.render_widget(Clear, area);
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title(Span::styled(
+            " 별칭 지정/편집 ",
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        ))
+        .border_style(Style::default().fg(Color::Cyan));
+
+    let inner = block.inner(area);
+    f.render_widget(block, area);
+
+    let lines: Vec<Line> = vec![
+        Line::from(""),
+        Line::from(vec![
+            Span::raw("  원본 제목: "),
+            Span::styled(data.original_title, Style::default().fg(Color::DarkGray)),
+        ]),
+        Line::from(""),
+        Line::from(vec![
+            Span::raw("  > "),
+            Span::styled(data.input, Style::default().fg(Color::White)),
+            Span::styled("│", Style::default().fg(Color::White)),
+        ]),
+        Line::from(""),
+        Line::from(vec![
+            Span::raw("  "),
+            Span::styled(
+                "[Enter] 저장 (빈칸=별칭 삭제)",
+                Style::default()
+                    .fg(Color::Green)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::raw("  "),
+            Span::styled("[Esc] 취소", Style::default().fg(Color::DarkGray)),
+        ]),
+        Line::from(""),
+    ];
 
     let para = Paragraph::new(lines).alignment(Alignment::Left);
     f.render_widget(para, inner);

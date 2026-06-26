@@ -5,6 +5,18 @@
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-06-26
+
+### Added (M3 — 세션 별칭 FR-06)
+- **세션 별칭(FR-06):** `n`으로 세션에 사용자 별칭을 지정/편집/삭제(인라인 모달, 80자 가드). 목록·미리보기 제목이 별칭으로 표시되고(`~ ` 텍스트 마커로 식별 — 색 무관 §5.7), 도출 원본 제목은 보존돼 빈칸 저장 시 자동 복원. 검색(FR-05)·Title 정렬(FR-07)도 별칭(`display_title`) 기준에 합성.
+- **사이드카 저장:** 별칭은 `~/.claude/claudedesk/meta.json`(trash/index.json의 형제)에 `session_id → {alias}` 스키마로 저장. `trash.rs`의 temp+rename 원자적 write 패턴을 복제, 손상 시 graceful 빈 store, `version` 필드로 포맷 진화 대비.
+
+### Safety
+- **원본 JSONL 불변:** 별칭은 사이드카에만 기록 — 원본 `*.jsonl`은 읽기조차 변경 0. 별칭 set/save 전후 및 모듈 추가 후 픽스처 SHA-256 불변 회귀로 강제.
+
+### Tests
+- alias 유닛 6 + 통합 5(별칭 재로드·display_title·JSONL SHA 불변·소프트삭제→복구 후 별칭 보존·검색 결합) + Title 정렬 회귀 1 + search_text 결합 1. 총 168 테스트 통과, clippy `-D warnings`·fmt 그린.
+
 ## [0.6.0] - 2026-06-25
 
 ### Added (M3 — 미리보기 / 하우스키핑 강화)
