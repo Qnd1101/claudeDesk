@@ -1,0 +1,4 @@
+{"type":"summary","timestamp":"2025-06-01T00:00:00Z","summary":"surrogate 회귀 픽스처 (합성)"}
+{"type":"user","timestamp":"2025-06-01T00:00:01Z","cwd":"/synthetic/surrogate","message":{"role":"user","content":"broken lone high surrogate \uD83D in body should skip"}}
+{"type":"user","timestamp":"2025-06-01T00:00:02Z","cwd":"/synthetic/surrogate","message":{"role":"user","content":"surrogate 줄 스킵 후 이 줄이 제목이 돼야 함"}}
+{"type":"assistant","timestamp":"2025-06-01T00:00:03Z","message":{"role":"assistant","content":"합성 응답"}}

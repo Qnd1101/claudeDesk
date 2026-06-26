@@ -31,8 +31,17 @@ enum PreviewCacheKey {
 use crate::trash::{purge_sessions, restore_sessions, soft_delete_sessions, TrashIndex};
 use help::render_help;
 use list::{render_list, PREVIEW_MIN_WIDTH};
-use modal::{render_delete_confirm, render_purge_confirm, DeleteConfirmData, PurgeConfirmData};
+use modal::{
+    render_age_select, render_alias_edit, render_delete_confirm, render_purge_confirm,
+    AgeSelectData, AliasEditData, DeleteConfirmData, PurgeConfirmData,
+};
 use trash_view::render_trash;
+
+/// FR-14: 오래된 세션 선택 모달의 기준 일수 프리셋
+const AGE_PRESET_DAYS: [u64; 5] = [7, 30, 90, 180, 365];
+
+/// 하루 초 (FR-14 cutoff 계산)
+const SECS_PER_DAY: u64 = 86_400;
 
 /// UI 모드
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -47,6 +56,10 @@ enum UiMode {
     Trash,
     /// purge 2단계 확인 모달 (D in Trash)
     PurgeConfirm,
+    /// 별칭 지정/편집 모달 (n, FR-06)
+    AliasEdit,
+    /// 오래된 세션 선택 모달 (o, FR-14)
+    AgeSelect,
 }
 
 pub struct App {
@@ -85,6 +98,14 @@ pub struct App {
     /// "DELETE" 타이핑 버퍼
     purge_input: String,
 
+    // ── FR-06: 별칭 편집 모달 상태 ───────────────────────────────────────
+    /// 별칭 편집 모달 입력 버퍼
+    alias_input: String,
+    /// 편집 대상 session_id 스냅샷 (모달 열릴 때 캡처)
+    alias_target_id: Option<String>,
+    /// 편집 대상 세션의 표시 제목 스냅샷 (원본 제목 표시용)
+    alias_target_title: String,
+
     // ── 상태 메시지 ───────────────────────────────────────────────────────
     /// 임시 상태 메시지 (작업 결과 표시용)
     status_message: Option<String>,
@@ -94,6 +115,12 @@ pub struct App {
     preview_open: bool,
     /// 미리보기 캐시: (키, PreviewContent) — 같은 키이면 재읽기 금지
     preview_cache: Option<(PreviewCacheKey, PreviewContent)>,
+
+    // ── FR-14: 오래된 세션 선택 모달 상태 ────────────────────────────────
+    /// 모달 내 커서(AGE_PRESET_DAYS 인덱스)
+    age_cursor: usize,
+    /// 프리셋별 대상 세션 수(모달 열 때 계산, AGE_PRESET_DAYS와 동일 순서)
+    age_counts: Vec<usize>,
 }
 
 impl App {
@@ -118,10 +145,17 @@ impl App {
             purge_pending_ids: vec![],
             purge_input: String::new(),
 
+            alias_input: String::new(),
+            alias_target_id: None,
+            alias_target_title: String::new(),
+
             status_message: None,
 
             preview_open: false,
             preview_cache: None,
+
+            age_cursor: 0,
+            age_counts: vec![],
         }
     }
 
@@ -187,6 +221,7 @@ impl App {
                         UiMode::DeleteConfirm => {
                             let preview_content = self.current_preview_content();
                             let preview_title = self.current_session_title();
+                            let preview_path = self.current_session_cwd();
                             render_list(
                                 f,
                                 &self.state,
@@ -197,6 +232,7 @@ impl App {
                                 self.preview_open,
                                 preview_content,
                                 &preview_title,
+                                &preview_path,
                             );
                             let data = DeleteConfirmData {
                                 titles: &self.delete_titles,
@@ -213,10 +249,61 @@ impl App {
                             };
                             render_purge_confirm(f, &data);
                         }
+                        UiMode::AliasEdit => {
+                            let preview_content = self.current_preview_content();
+                            let preview_title = self.current_session_title();
+                            let preview_path = self.current_session_cwd();
+                            render_list(
+                                f,
+                                &self.state,
+                                self.cursor,
+                                false,
+                                &self.state.selected_ids.clone(),
+                                self.status_message.as_deref(),
+                                self.preview_open,
+                                preview_content,
+                                &preview_title,
+                                &preview_path,
+                            );
+                            let data = AliasEditData {
+                                original_title: &self.alias_target_title,
+                                input: &self.alias_input,
+                            };
+                            render_alias_edit(f, &data);
+                        }
+                        UiMode::AgeSelect => {
+                            let preview_content = self.current_preview_content();
+                            let preview_title = self.current_session_title();
+                            let preview_path = self.current_session_cwd();
+                            render_list(
+                                f,
+                                &self.state,
+                                self.cursor,
+                                false,
+                                &self.state.selected_ids.clone(),
+                                self.status_message.as_deref(),
+                                self.preview_open,
+                                preview_content,
+                                &preview_title,
+                                &preview_path,
+                            );
+                            // (기준 일수, 대상 수) 쌍으로 모달에 전달
+                            let options: Vec<(u64, usize)> = AGE_PRESET_DAYS
+                                .iter()
+                                .copied()
+                                .zip(self.age_counts.iter().copied())
+                                .collect();
+                            let data = AgeSelectData {
+                                options: &options,
+                                cursor: self.age_cursor,
+                            };
+                            render_age_select(f, &data);
+                        }
                         _ => {
                             let search_mode = self.mode == UiMode::Search;
                             let preview_content = self.current_preview_content();
                             let preview_title = self.current_session_title();
+                            let preview_path = self.current_session_cwd();
                             render_list(
                                 f,
                                 &self.state,
@@ -227,6 +314,7 @@ impl App {
                                 self.preview_open,
                                 preview_content,
                                 &preview_title,
+                                &preview_path,
                             );
                         }
                     }
@@ -263,6 +351,8 @@ impl App {
             UiMode::Trash => return self.handle_trash_key(code),
             UiMode::PurgeConfirm => return self.handle_purge_confirm_key(code),
             UiMode::Search => return self.handle_search_key(code),
+            UiMode::AliasEdit => return self.handle_alias_edit_key(code),
+            UiMode::AgeSelect => return self.handle_age_select_key(code),
             UiMode::Normal => {}
         }
 
@@ -402,6 +492,11 @@ impl App {
                 self.open_trash();
             }
 
+            // ── FR-14: 오래된 세션 선택 모달 열기 (o) ───────────────────
+            KeyCode::Char('o') => {
+                self.open_age_select();
+            }
+
             // ── FR-09: 그룹 모드 토글 (g) ────────────────────────────────
             KeyCode::Char('g') => {
                 self.state.grouped = !self.state.grouped;
@@ -421,6 +516,21 @@ impl App {
                         self.clamp_cursor();
                     }
                 }
+            }
+
+            // ── FR-06: 별칭 지정/편집 (n) ────────────────────────────────────
+            KeyCode::Char('n') => {
+                if let Some(session) = self.current_session() {
+                    let sid = session.session_id.clone();
+                    // 모달엔 도출 원본 제목을 표시(별칭은 입력 prefill로 따로 채워 편집 시 원본 참조 가능)
+                    let title = session.title.clone();
+                    let prefill = session.alias.clone().unwrap_or_default();
+                    self.alias_target_id = Some(sid);
+                    self.alias_target_title = title;
+                    self.alias_input = prefill;
+                    self.mode = UiMode::AliasEdit;
+                }
+                // current_session() == None (그룹 헤더) 이면 무시
             }
 
             // Resume
@@ -639,6 +749,86 @@ impl App {
         Ok(false)
     }
 
+    // ── 별칭 편집 모달 키 처리 (FR-06) ──────────────────────────────────
+
+    fn handle_alias_edit_key(&mut self, code: KeyCode) -> Result<bool> {
+        match code {
+            KeyCode::Esc => {
+                self.cancel_alias_edit();
+            }
+            KeyCode::Enter => {
+                if let Some(sid) = self.alias_target_id.clone() {
+                    let input = self.alias_input.clone();
+                    let msg = match self.state.set_alias(&sid, &input) {
+                        Ok(()) => {
+                            if input.trim().is_empty() {
+                                "별칭을 삭제했습니다".to_string()
+                            } else {
+                                format!("별칭을 '{}'(으)로 설정했습니다", input.trim())
+                            }
+                        }
+                        Err(e) => format!("별칭 저장 실패: {e}"),
+                    };
+                    self.status_message = Some(msg);
+                    self.cancel_alias_edit();
+                    self.refresh_preview_cache();
+                }
+            }
+            KeyCode::Backspace => {
+                self.alias_input.pop();
+            }
+            // 길이 가드: 80자 미만일 때만 입력 허용
+            KeyCode::Char(c) if self.alias_input.chars().count() < 80 => {
+                self.alias_input.push(c);
+            }
+            _ => {}
+        }
+        Ok(false)
+    }
+
+    // ── FR-14: 오래된 세션 선택 모달 키 처리 ─────────────────────────────
+
+    fn handle_age_select_key(&mut self, code: KeyCode) -> Result<bool> {
+        match code {
+            KeyCode::Esc => {
+                self.mode = UiMode::Normal;
+            }
+            KeyCode::Up | KeyCode::Char('k') => {
+                if self.age_cursor > 0 {
+                    self.age_cursor -= 1;
+                }
+            }
+            KeyCode::Down | KeyCode::Char('j') => {
+                if self.age_cursor + 1 < AGE_PRESET_DAYS.len() {
+                    self.age_cursor += 1;
+                }
+            }
+            KeyCode::Enter => {
+                let days = AGE_PRESET_DAYS[self.age_cursor];
+                let cutoff =
+                    std::time::SystemTime::now() - Duration::from_secs(days * SECS_PER_DAY);
+                let n = self.state.select_older_than(cutoff);
+                self.status_message = Some(if n == 0 {
+                    format!("{}일 이전 세션이 없습니다", days)
+                } else {
+                    format!("{}일 이전 {}개 세션 선택됨 — d로 삭제 확인", days, n)
+                });
+                self.mode = UiMode::Normal;
+                self.refresh_preview_cache();
+            }
+            _ => {}
+        }
+        Ok(false)
+    }
+
+    /// 별칭 편집 취소: 입력 버퍼·타깃 비우고 Normal 복귀
+    fn cancel_alias_edit(&mut self) {
+        self.alias_input.clear();
+        self.alias_target_id = None;
+        self.alias_target_title.clear();
+        self.mode = UiMode::Normal;
+    }
+
     // ── 내부 동작 헬퍼 ────────────────────────────────────────────────────
 
     /// 삭제 확인 모달 열기
@@ -751,6 +941,20 @@ impl App {
         self.state.selected_ids.clear();
 
         Ok(())
+    }
+
+    /// FR-14: 오래된 세션 선택 모달 열기 — 각 프리셋의 대상 수를 미리 계산해 표시.
+    fn open_age_select(&mut self) {
+        let now = std::time::SystemTime::now();
+        self.age_counts = AGE_PRESET_DAYS
+            .iter()
+            .map(|&days| {
+                let cutoff = now - Duration::from_secs(days * SECS_PER_DAY);
+                self.state.older_than_ids(cutoff).len()
+            })
+            .collect();
+        self.age_cursor = 0;
+        self.mode = UiMode::AgeSelect;
     }
 
     /// 휴지통 화면 열기
@@ -971,10 +1175,18 @@ impl App {
         self.preview_cache.as_ref().map(|(_, c)| c)
     }
 
-    /// 현재 세션 제목 반환 (미리보기 패널 타이틀용)
+    /// 현재 세션 표시 제목 반환 (미리보기 패널 타이틀용). 별칭 우선 (FR-06).
     fn current_session_title(&self) -> String {
         self.current_session()
-            .map(|s| s.title.clone())
+            .map(|s| s.display_title().to_string())
+            .unwrap_or_default()
+    }
+
+    /// 현재 세션의 작업 디렉토리(cwd) 전체 경로 반환 (미리보기 경로 헤더용 ①).
+    /// 그룹 헤더 커서 등 세션이 아닐 땐 빈 문자열.
+    fn current_session_cwd(&self) -> String {
+        self.current_session()
+            .map(|s| s.cwd.clone())
             .unwrap_or_default()
     }
 }

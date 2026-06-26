@@ -57,6 +57,7 @@ fn test_fixtures_immutable_after_parse() {
         "emoji_and_unicode.jsonl",
         "over_scan_limit.jsonl",
         "null_content_fallback.jsonl",
+        "surrogate.jsonl",
     ];
 
     for name in &fixtures {
@@ -221,6 +222,34 @@ fn test_over_scan_limit_untitled() {
     assert!(
         result.msg_count >= 1,
         "over_scan 픽스처 메시지 수 0 (assistant 1개 이상 있어야 함)"
+    );
+}
+
+/// lone(broken) surrogate 든 줄 → serde_json 파싱 실패로 graceful skip,
+/// 크래시 0, 뒤 정상 줄에서 제목·cwd 추출 (§5.11 회귀 픽스처 세트)
+#[test]
+fn test_surrogate_lone_skip() {
+    let meta = make_meta("surrogate.jsonl");
+    let result = parse_session(&meta).expect("surrogate 픽스처 파싱 크래시 금지");
+    // lone surrogate 줄이 graceful skip 돼야 함
+    assert!(
+        result.skipped_lines >= 1,
+        "lone surrogate 줄 스킵 카운트 부족: {}",
+        result.skipped_lines
+    );
+    // 스킵 후 다음 정상 user 줄이 제목이 돼야 함
+    assert_eq!(
+        result.title, "surrogate 줄 스킵 후 이 줄이 제목이 돼야 함",
+        "surrogate 스킵 후 제목 추출 실패: {}",
+        result.title
+    );
+    // cwd는 정상 줄에서 추출 (surrogate 줄이 첫 줄이지만 스킵되므로)
+    assert_eq!(result.cwd, "/synthetic/surrogate");
+    // 메시지 수: 정상 user 1 + assistant 1 = 2 (surrogate user 줄은 스킵)
+    assert_eq!(
+        result.msg_count, 2,
+        "메시지 수 불일치: {}",
+        result.msg_count
     );
 }
 
