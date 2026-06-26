@@ -7,60 +7,9 @@ use crate::domain::Session;
 use crate::parser::{build_search_text, build_session, parse_session};
 
 // ── 정렬 (FR-07) ─────────────────────────────────────────────────────────────
-
-/// 정렬 키 (4종)
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SortKey {
-    Modified,
-    Created,
-    Title,
-    Messages,
-}
-
-impl SortKey {
-    /// 다음 키로 순환 (modified→created→title→messages→modified)
-    pub fn next(self) -> Self {
-        match self {
-            SortKey::Modified => SortKey::Created,
-            SortKey::Created => SortKey::Title,
-            SortKey::Title => SortKey::Messages,
-            SortKey::Messages => SortKey::Modified,
-        }
-    }
-
-    /// 표시 레이블
-    pub fn label(self) -> &'static str {
-        match self {
-            SortKey::Modified => "Modified",
-            SortKey::Created => "Created",
-            SortKey::Title => "Title",
-            SortKey::Messages => "Messages",
-        }
-    }
-}
-
-/// 정렬 방향
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SortDir {
-    Desc,
-    Asc,
-}
-
-impl SortDir {
-    pub fn toggle(self) -> Self {
-        match self {
-            SortDir::Desc => SortDir::Asc,
-            SortDir::Asc => SortDir::Desc,
-        }
-    }
-
-    pub fn arrow(self) -> &'static str {
-        match self {
-            SortDir::Desc => "↓",
-            SortDir::Asc => "↑",
-        }
-    }
-}
+// SortKey, SortDir は config.rs で定義 (serde + FR-10 設定レイヤー)。
+// ここでは re-export して後方互換性を維持する。
+pub use crate::config::{SortDir, SortKey};
 
 /// 정렬 상태 (키 + 방향)
 #[derive(Debug, Clone, Copy)]
