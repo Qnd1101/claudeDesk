@@ -59,7 +59,6 @@ impl AliasStore {
     }
 
     /// 원자적 저장 (temp+rename)
-    #[allow(dead_code)]
     pub fn save(&self) -> Result<()> {
         let path = alias_meta_path()?;
         save_alias_to(self, &path)
@@ -74,7 +73,6 @@ impl AliasStore {
     }
 
     /// 별칭 설정/삭제. 트림 후 빈 문자열이면 키 제거 (빈 값 잔류 방지).
-    #[allow(dead_code)]
     pub fn set(&mut self, session_id: &str, alias: &str) {
         let trimmed = alias.trim();
         if trimmed.is_empty() {
@@ -104,7 +102,6 @@ pub fn load_alias_from(path: &Path) -> AliasStore {
 }
 
 /// 지정 경로에 AliasStore 원자적 저장 (temp+rename — trash::save_index_to 대응)
-#[allow(dead_code)]
 pub fn save_alias_to(store: &AliasStore, path: &Path) -> Result<()> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).context("meta 디렉토리 생성 실패")?;

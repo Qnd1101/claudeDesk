@@ -465,11 +465,11 @@ impl App {
             KeyCode::Char('n') => {
                 if let Some(session) = self.current_session() {
                     let sid = session.session_id.clone();
-                    // display_title()을 원본 제목 표시에 사용 (별칭 유무 상관없이)
-                    let display = session.display_title().to_string();
+                    // 모달엔 도출 원본 제목을 표시(별칭은 입력 prefill로 따로 채워 편집 시 원본 참조 가능)
+                    let title = session.title.clone();
                     let prefill = session.alias.clone().unwrap_or_default();
                     self.alias_target_id = Some(sid);
-                    self.alias_target_title = display;
+                    self.alias_target_title = title;
                     self.alias_input = prefill;
                     self.mode = UiMode::AliasEdit;
                 }

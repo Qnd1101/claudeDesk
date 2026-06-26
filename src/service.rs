@@ -219,7 +219,6 @@ pub struct AppState {
     /// 접힌 프로젝트 cwd 집합 (FR-09)
     pub collapsed_projects: std::collections::HashSet<String>,
     /// 별칭 사이드카 (FR-06). 편집 시 메모리 갱신 + 즉시 save.
-    #[allow(dead_code)]
     pub aliases: crate::alias::AliasStore,
 }
 
@@ -357,7 +356,6 @@ impl AppState {
 
     /// 별칭 설정 + 사이드카 원자적 저장 + 해당 세션 메모리 갱신 (FR-06).
     /// first_user_raw는 메모리에 없으므로 None으로 재조립 (의도적 트레이드오프 — plan §3.5).
-    #[allow(dead_code)]
     pub fn set_alias(&mut self, session_id: &str, new_alias: &str) -> anyhow::Result<()> {
         self.aliases.set(session_id, new_alias);
         self.aliases.save()?;
@@ -674,6 +672,28 @@ mod tests {
             alias: None,
             search_text,
         }
+    }
+
+    /// FR-06: Title 정렬이 도출 title이 아닌 display_title(별칭 우선) 기준인지 (LOW-2 회귀 방지)
+    #[test]
+    fn test_sort_title_uses_display_title() {
+        let mut zebra = make_session("Zebra", 100, 1);
+        zebra.alias = Some("Aardvark".to_string()); // display_title = "Aardvark"
+        let apple = make_session("Apple", 200, 1); // 별칭 없음 → display_title = "Apple"
+        let mut sessions = vec![zebra, apple];
+        apply_sort(
+            &mut sessions,
+            SortState {
+                key: SortKey::Title,
+                dir: SortDir::Asc,
+            },
+        );
+        // 별칭 "Aardvark" < "Apple" → 별칭 단 Zebra 세션이 먼저 와야 한다
+        assert_eq!(
+            sessions[0].title, "Zebra",
+            "Title 정렬이 display_title(별칭) 기준이 아님"
+        );
+        assert_eq!(sessions[1].title, "Apple");
     }
 
     #[test]
