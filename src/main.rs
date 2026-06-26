@@ -44,10 +44,12 @@ fn main() -> Result<()> {
     };
 
     let config = Config::load(&cli)?;
+    // App에도 Config를 전달해야 하므로 먼저 클론 (T11.2: 설정 화면, T11.3: 색상 제어)
+    let config_for_app = config.clone();
     let service = SessionService::new(config);
     let state = AppState::build(&service)?;
 
-    let mut app = App::new(state);
+    let mut app = App::new(state, config_for_app);
     app.run()?;
 
     Ok(())

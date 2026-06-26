@@ -174,7 +174,11 @@ pub struct AppState {
 impl AppState {
     pub fn build(service: &SessionService) -> Result<Self> {
         let aliases = crate::alias::AliasStore::load();
-        let sort = SortState::default();
+        // FR-10 T11.2 배선: config.default_sort를 초기 정렬 기본값으로 사용
+        let sort = SortState {
+            key: service.config.default_sort.key,
+            dir: service.config.default_sort.dir,
+        };
         let (sessions, stats) = service.load_sessions(sort, &aliases)?;
         Ok(AppState {
             sessions,
