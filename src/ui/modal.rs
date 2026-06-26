@@ -1,4 +1,5 @@
 /// 삭제 확인 모달 (FR-04, §2.4) + purge 2단계 확인 모달 (FR-11) + 별칭 편집 모달 (FR-06)
+/// + 오래된 세션 선택 모달 (FR-14)
 use ratatui::{
     layout::Alignment,
     style::{Color, Modifier, Style},
@@ -94,6 +95,107 @@ pub fn render_delete_confirm(f: &mut Frame, data: &DeleteConfirmData<'_>) {
         Span::styled("[Esc] 취소", Style::default().fg(Color::DarkGray)),
     ]));
     lines.push(Line::from(""));
+
+    let para = Paragraph::new(lines).alignment(Alignment::Left);
+    f.render_widget(para, inner);
+}
+
+// ── 오래된 세션 선택 모달 (FR-14) ───────────────────────────────────────────
+
+/// 오래된 세션 선택 모달에 전달할 데이터
+pub struct AgeSelectData<'a> {
+    /// (기준 일수, 해당 기준 이전 대상 세션 수) 목록
+    pub options: &'a [(u64, usize)],
+    /// 현재 커서가 가리키는 옵션 인덱스
+    pub cursor: usize,
+}
+
+/// 오래된 세션 선택 모달 렌더 (FR-14)
+/// ↑↓ = 기준 선택, Enter = 해당 기준 이전 세션을 다중선택에 추가(삭제 아님), Esc = 취소
+pub fn render_age_select(f: &mut Frame, data: &AgeSelectData<'_>) {
+    let height = 9 + data.options.len() as u16;
+    let area = centered_rect(56, height, f.area());
+
+    f.render_widget(Clear, area);
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title(Span::styled(
+            " 오래된 세션 선택 ",
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
+        ))
+        .border_style(Style::default().fg(Color::Yellow));
+
+    let inner = block.inner(area);
+    f.render_widget(block, area);
+
+    let mut lines: Vec<Line> = vec![
+        Line::from(""),
+        Line::from(vec![
+            Span::raw("  "),
+            Span::styled(
+                "기준일 이전에 수정된 세션을 한 번에 선택합니다.",
+                Style::default().fg(Color::White),
+            ),
+        ]),
+        Line::from(""),
+    ];
+
+    for (i, (days, count)) in data.options.iter().enumerate() {
+        let is_cur = i == data.cursor;
+        let marker = if is_cur { "▸ " } else { "  " };
+        let label_style = if is_cur {
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(Color::White)
+        };
+        // 일수 우측정렬(3자리)로 열 정렬을 맞춘다.
+        let label = format!("{:>3}일 이전", days);
+        let count_style = if *count == 0 {
+            Style::default().fg(Color::DarkGray)
+        } else {
+            Style::default().fg(Color::Cyan)
+        };
+        lines.push(Line::from(vec![
+            Span::raw("    "),
+            Span::styled(marker, Style::default().fg(Color::Yellow)),
+            Span::styled(label, label_style),
+            Span::raw("   "),
+            Span::styled(format!("{}개", count), count_style),
+        ]));
+    }
+
+    lines.push(Line::from(""));
+    lines.push(Line::from(vec![
+        Span::raw("  "),
+        Span::styled("선택 후 ", Style::default().fg(Color::DarkGray)),
+        Span::styled(
+            "d",
+            Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(
+            " 로 삭제 확인 — 자동 삭제 아님",
+            Style::default().fg(Color::DarkGray),
+        ),
+    ]));
+    lines.push(Line::from(""));
+    lines.push(Line::from(vec![
+        Span::raw("   "),
+        Span::styled("[↑↓] 기준 선택", Style::default().fg(Color::Yellow)),
+        Span::raw("  "),
+        Span::styled(
+            "[Enter] 선택 적용",
+            Style::default()
+                .fg(Color::Green)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::raw("  "),
+        Span::styled("[Esc] 취소", Style::default().fg(Color::DarkGray)),
+    ]));
 
     let para = Paragraph::new(lines).alignment(Alignment::Left);
     f.render_widget(para, inner);

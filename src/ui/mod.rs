@@ -32,10 +32,16 @@ use crate::trash::{purge_sessions, restore_sessions, soft_delete_sessions, Trash
 use help::render_help;
 use list::{render_list, PREVIEW_MIN_WIDTH};
 use modal::{
-    render_alias_edit, render_delete_confirm, render_purge_confirm, AliasEditData,
-    DeleteConfirmData, PurgeConfirmData,
+    render_age_select, render_alias_edit, render_delete_confirm, render_purge_confirm,
+    AgeSelectData, AliasEditData, DeleteConfirmData, PurgeConfirmData,
 };
 use trash_view::render_trash;
+
+/// FR-14: 오래된 세션 선택 모달의 기준 일수 프리셋
+const AGE_PRESET_DAYS: [u64; 5] = [7, 30, 90, 180, 365];
+
+/// 하루 초 (FR-14 cutoff 계산)
+const SECS_PER_DAY: u64 = 86_400;
 
 /// UI 모드
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -52,6 +58,8 @@ enum UiMode {
     PurgeConfirm,
     /// 별칭 지정/편집 모달 (n, FR-06)
     AliasEdit,
+    /// 오래된 세션 선택 모달 (o, FR-14)
+    AgeSelect,
 }
 
 pub struct App {
@@ -107,6 +115,12 @@ pub struct App {
     preview_open: bool,
     /// 미리보기 캐시: (키, PreviewContent) — 같은 키이면 재읽기 금지
     preview_cache: Option<(PreviewCacheKey, PreviewContent)>,
+
+    // ── FR-14: 오래된 세션 선택 모달 상태 ────────────────────────────────
+    /// 모달 내 커서(AGE_PRESET_DAYS 인덱스)
+    age_cursor: usize,
+    /// 프리셋별 대상 세션 수(모달 열 때 계산, AGE_PRESET_DAYS와 동일 순서)
+    age_counts: Vec<usize>,
 }
 
 impl App {
@@ -139,6 +153,9 @@ impl App {
 
             preview_open: false,
             preview_cache: None,
+
+            age_cursor: 0,
+            age_counts: vec![],
         }
     }
 
@@ -254,6 +271,34 @@ impl App {
                             };
                             render_alias_edit(f, &data);
                         }
+                        UiMode::AgeSelect => {
+                            let preview_content = self.current_preview_content();
+                            let preview_title = self.current_session_title();
+                            let preview_path = self.current_session_cwd();
+                            render_list(
+                                f,
+                                &self.state,
+                                self.cursor,
+                                false,
+                                &self.state.selected_ids.clone(),
+                                self.status_message.as_deref(),
+                                self.preview_open,
+                                preview_content,
+                                &preview_title,
+                                &preview_path,
+                            );
+                            // (기준 일수, 대상 수) 쌍으로 모달에 전달
+                            let options: Vec<(u64, usize)> = AGE_PRESET_DAYS
+                                .iter()
+                                .copied()
+                                .zip(self.age_counts.iter().copied())
+                                .collect();
+                            let data = AgeSelectData {
+                                options: &options,
+                                cursor: self.age_cursor,
+                            };
+                            render_age_select(f, &data);
+                        }
                         _ => {
                             let search_mode = self.mode == UiMode::Search;
                             let preview_content = self.current_preview_content();
@@ -307,6 +352,7 @@ impl App {
             UiMode::PurgeConfirm => return self.handle_purge_confirm_key(code),
             UiMode::Search => return self.handle_search_key(code),
             UiMode::AliasEdit => return self.handle_alias_edit_key(code),
+            UiMode::AgeSelect => return self.handle_age_select_key(code),
             UiMode::Normal => {}
         }
 
@@ -444,6 +490,11 @@ impl App {
             // ── M2: 휴지통 열기 (T, FR-11) ──────────────────────────────
             KeyCode::Char('T') => {
                 self.open_trash();
+            }
+
+            // ── FR-14: 오래된 세션 선택 모달 열기 (o) ───────────────────
+            KeyCode::Char('o') => {
+                self.open_age_select();
             }
 
             // ── FR-09: 그룹 모드 토글 (g) ────────────────────────────────
@@ -735,6 +786,41 @@ impl App {
         Ok(false)
     }
 
+    // ── FR-14: 오래된 세션 선택 모달 키 처리 ─────────────────────────────
+
+    fn handle_age_select_key(&mut self, code: KeyCode) -> Result<bool> {
+        match code {
+            KeyCode::Esc => {
+                self.mode = UiMode::Normal;
+            }
+            KeyCode::Up | KeyCode::Char('k') => {
+                if self.age_cursor > 0 {
+                    self.age_cursor -= 1;
+                }
+            }
+            KeyCode::Down | KeyCode::Char('j') => {
+                if self.age_cursor + 1 < AGE_PRESET_DAYS.len() {
+                    self.age_cursor += 1;
+                }
+            }
+            KeyCode::Enter => {
+                let days = AGE_PRESET_DAYS[self.age_cursor];
+                let cutoff =
+                    std::time::SystemTime::now() - Duration::from_secs(days * SECS_PER_DAY);
+                let n = self.state.select_older_than(cutoff);
+                self.status_message = Some(if n == 0 {
+                    format!("{}일 이전 세션이 없습니다", days)
+                } else {
+                    format!("{}일 이전 {}개 세션 선택됨 — d로 삭제 확인", days, n)
+                });
+                self.mode = UiMode::Normal;
+                self.refresh_preview_cache();
+            }
+            _ => {}
+        }
+        Ok(false)
+    }
+
     /// 별칭 편집 취소: 입력 버퍼·타깃 비우고 Normal 복귀
     fn cancel_alias_edit(&mut self) {
         self.alias_input.clear();
@@ -855,6 +941,20 @@ impl App {
         self.state.selected_ids.clear();
 
         Ok(())
+    }
+
+    /// FR-14: 오래된 세션 선택 모달 열기 — 각 프리셋의 대상 수를 미리 계산해 표시.
+    fn open_age_select(&mut self) {
+        let now = std::time::SystemTime::now();
+        self.age_counts = AGE_PRESET_DAYS
+            .iter()
+            .map(|&days| {
+                let cutoff = now - Duration::from_secs(days * SECS_PER_DAY);
+                self.state.older_than_ids(cutoff).len()
+            })
+            .collect();
+        self.age_cursor = 0;
+        self.mode = UiMode::AgeSelect;
     }
 
     /// 휴지통 화면 열기

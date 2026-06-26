@@ -77,6 +77,10 @@ pub fn render_help(f: &mut Frame) {
             Span::styled("  Del/d", Style::default().fg(Color::Red)),
             Span::raw("  삭제 확인 모달 → 휴지통 이동"),
         ]),
+        Line::from(vec![
+            Span::styled("  o    ", Style::default().fg(Color::Red)),
+            Span::raw("  오래된 세션 선택(기준일 이전) → d로 삭제 (FR-14)"),
+        ]),
         Line::from(""),
         // 휴지통 (FR-11)
         Line::from(vec![
