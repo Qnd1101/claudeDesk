@@ -1,5 +1,7 @@
 /// 삭제 확인 모달 (FR-04, §2.4) + purge 2단계 확인 모달 (FR-11) + 별칭 편집 모달 (FR-06)
 /// + 오래된 세션 선택 모달 (FR-14)
+///
+/// T11.3: 모든 모달이 `color_enabled` 필드를 통해 Mono/NO_COLOR를 지원한다.
 use ratatui::{
     layout::Alignment,
     style::{Color, Modifier, Style},
@@ -9,6 +11,7 @@ use ratatui::{
 };
 
 use super::layout::centered_rect;
+use super::theme::{cond_fg, cond_fg_bold};
 
 // ── 소프트 삭제 확인 모달 (§2.4) ────────────────────────────────────────────
 
@@ -18,11 +21,14 @@ pub struct DeleteConfirmData<'a> {
     pub titles: &'a [String],
     /// 활성 세션이라 스킵될 수 (표시용)
     pub active_count: usize,
+    /// T11.3 색상 활성 여부
+    pub color_enabled: bool,
 }
 
 /// 소프트 삭제 확인 모달 렌더 (FR-04 §2.4)
 /// Enter = 확인, Esc = 취소
 pub fn render_delete_confirm(f: &mut Frame, data: &DeleteConfirmData<'_>) {
+    let ce = data.color_enabled;
     let list_lines = data.titles.len().min(5) as u16;
     let height = 9 + list_lines;
     let area = centered_rect(58, height, f.area());
@@ -31,13 +37,8 @@ pub fn render_delete_confirm(f: &mut Frame, data: &DeleteConfirmData<'_>) {
 
     let block = Block::default()
         .borders(Borders::ALL)
-        .title(Span::styled(
-            " 삭제 확인 ",
-            Style::default()
-                .fg(Color::Yellow)
-                .add_modifier(Modifier::BOLD),
-        ))
-        .border_style(Style::default().fg(Color::Yellow));
+        .title(Span::styled(" 삭제 확인 ", cond_fg_bold(ce, Color::Yellow)))
+        .border_style(cond_fg(ce, Color::Yellow));
 
     let inner = block.inner(area);
     f.render_widget(block, area);
@@ -58,7 +59,7 @@ pub fn render_delete_confirm(f: &mut Frame, data: &DeleteConfirmData<'_>) {
     for title in data.titles.iter().take(show) {
         lines.push(Line::from(vec![
             Span::raw("    · "),
-            Span::styled(title.as_str(), Style::default().fg(Color::White)),
+            Span::raw(title.as_str()),
         ]));
     }
     if data.titles.len() > 5 {
@@ -66,7 +67,7 @@ pub fn render_delete_confirm(f: &mut Frame, data: &DeleteConfirmData<'_>) {
             Span::raw("    "),
             Span::styled(
                 format!("... 외 {}개", data.titles.len() - 5),
-                Style::default().fg(Color::DarkGray),
+                cond_fg(ce, Color::DarkGray),
             ),
         ]));
     }
@@ -77,7 +78,7 @@ pub fn render_delete_confirm(f: &mut Frame, data: &DeleteConfirmData<'_>) {
             Span::raw("  "),
             Span::styled(
                 format!("⚠ 활성 세션 {}개는 제외됩니다(●).", data.active_count),
-                Style::default().fg(Color::Red),
+                cond_fg(ce, Color::Red),
             ),
         ]));
     }
@@ -85,14 +86,9 @@ pub fn render_delete_confirm(f: &mut Frame, data: &DeleteConfirmData<'_>) {
     lines.push(Line::from(""));
     lines.push(Line::from(vec![
         Span::raw("      "),
-        Span::styled(
-            "[Enter] 휴지통 이동",
-            Style::default()
-                .fg(Color::Green)
-                .add_modifier(Modifier::BOLD),
-        ),
+        Span::styled("[Enter] 휴지통 이동", cond_fg_bold(ce, Color::Green)),
         Span::raw("    "),
-        Span::styled("[Esc] 취소", Style::default().fg(Color::DarkGray)),
+        Span::styled("[Esc] 취소", cond_fg(ce, Color::DarkGray)),
     ]));
     lines.push(Line::from(""));
 
@@ -108,11 +104,14 @@ pub struct AgeSelectData<'a> {
     pub options: &'a [(u64, usize)],
     /// 현재 커서가 가리키는 옵션 인덱스
     pub cursor: usize,
+    /// T11.3 색상 활성 여부
+    pub color_enabled: bool,
 }
 
 /// 오래된 세션 선택 모달 렌더 (FR-14)
 /// ↑↓ = 기준 선택, Enter = 해당 기준 이전 세션을 다중선택에 추가(삭제 아님), Esc = 취소
 pub fn render_age_select(f: &mut Frame, data: &AgeSelectData<'_>) {
+    let ce = data.color_enabled;
     let height = 9 + data.options.len() as u16;
     let area = centered_rect(56, height, f.area());
 
@@ -122,11 +121,9 @@ pub fn render_age_select(f: &mut Frame, data: &AgeSelectData<'_>) {
         .borders(Borders::ALL)
         .title(Span::styled(
             " 오래된 세션 선택 ",
-            Style::default()
-                .fg(Color::Yellow)
-                .add_modifier(Modifier::BOLD),
+            cond_fg_bold(ce, Color::Yellow),
         ))
-        .border_style(Style::default().fg(Color::Yellow));
+        .border_style(cond_fg(ce, Color::Yellow));
 
     let inner = block.inner(area);
     f.render_widget(block, area);
@@ -135,10 +132,7 @@ pub fn render_age_select(f: &mut Frame, data: &AgeSelectData<'_>) {
         Line::from(""),
         Line::from(vec![
             Span::raw("  "),
-            Span::styled(
-                "기준일 이전에 수정된 세션을 한 번에 선택합니다.",
-                Style::default().fg(Color::White),
-            ),
+            Span::raw("기준일 이전에 수정된 세션을 한 번에 선택합니다."),
         ]),
         Line::from(""),
     ];
@@ -147,22 +141,20 @@ pub fn render_age_select(f: &mut Frame, data: &AgeSelectData<'_>) {
         let is_cur = i == data.cursor;
         let marker = if is_cur { "▸ " } else { "  " };
         let label_style = if is_cur {
-            Style::default()
-                .fg(Color::Yellow)
-                .add_modifier(Modifier::BOLD)
+            cond_fg_bold(ce, Color::Yellow)
         } else {
-            Style::default().fg(Color::White)
+            Style::default()
         };
         // 일수 우측정렬(3자리)로 열 정렬을 맞춘다.
         let label = format!("{:>3}일 이전", days);
         let count_style = if *count == 0 {
-            Style::default().fg(Color::DarkGray)
+            cond_fg(ce, Color::DarkGray)
         } else {
-            Style::default().fg(Color::Cyan)
+            cond_fg(ce, Color::Cyan)
         };
         lines.push(Line::from(vec![
             Span::raw("    "),
-            Span::styled(marker, Style::default().fg(Color::Yellow)),
+            Span::styled(marker, cond_fg(ce, Color::Yellow)),
             Span::styled(label, label_style),
             Span::raw("   "),
             Span::styled(format!("{}개", count), count_style),
@@ -172,29 +164,21 @@ pub fn render_age_select(f: &mut Frame, data: &AgeSelectData<'_>) {
     lines.push(Line::from(""));
     lines.push(Line::from(vec![
         Span::raw("  "),
-        Span::styled("선택 후 ", Style::default().fg(Color::DarkGray)),
-        Span::styled(
-            "d",
-            Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
-        ),
+        Span::styled("선택 후 ", cond_fg(ce, Color::DarkGray)),
+        Span::styled("d", cond_fg_bold(ce, Color::Red)),
         Span::styled(
             " 로 삭제 확인 — 자동 삭제 아님",
-            Style::default().fg(Color::DarkGray),
+            cond_fg(ce, Color::DarkGray),
         ),
     ]));
     lines.push(Line::from(""));
     lines.push(Line::from(vec![
         Span::raw("   "),
-        Span::styled("[↑↓] 기준 선택", Style::default().fg(Color::Yellow)),
+        Span::styled("[↑↓] 기준 선택", cond_fg(ce, Color::Yellow)),
         Span::raw("  "),
-        Span::styled(
-            "[Enter] 선택 적용",
-            Style::default()
-                .fg(Color::Green)
-                .add_modifier(Modifier::BOLD),
-        ),
+        Span::styled("[Enter] 선택 적용", cond_fg_bold(ce, Color::Green)),
         Span::raw("  "),
-        Span::styled("[Esc] 취소", Style::default().fg(Color::DarkGray)),
+        Span::styled("[Esc] 취소", cond_fg(ce, Color::DarkGray)),
     ]));
 
     let para = Paragraph::new(lines).alignment(Alignment::Left);
@@ -208,11 +192,14 @@ pub struct PurgeConfirmData<'a> {
     pub titles: &'a [String],
     /// 사용자가 입력 중인 확인 문자열 ("DELETE" 타이핑)
     pub input: &'a str,
+    /// T11.3 색상 활성 여부
+    pub color_enabled: bool,
 }
 
 /// purge 확인 모달 렌더 (FR-11 §2.7 영구삭제 2단계)
 /// "DELETE" 타이핑 후 Enter = 확인, Esc = 취소
 pub fn render_purge_confirm(f: &mut Frame, data: &PurgeConfirmData<'_>) {
+    let ce = data.color_enabled;
     let list_lines = data.titles.len().min(5) as u16;
     let height = 13 + list_lines;
     let area = centered_rect(60, height, f.area());
@@ -223,9 +210,9 @@ pub fn render_purge_confirm(f: &mut Frame, data: &PurgeConfirmData<'_>) {
         .borders(Borders::ALL)
         .title(Span::styled(
             " 영구삭제 확인 ",
-            Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+            cond_fg_bold(ce, Color::Red),
         ))
-        .border_style(Style::default().fg(Color::Red));
+        .border_style(cond_fg(ce, Color::Red));
 
     let inner = block.inner(area);
     f.render_widget(block, area);
@@ -236,7 +223,7 @@ pub fn render_purge_confirm(f: &mut Frame, data: &PurgeConfirmData<'_>) {
             Span::raw("  "),
             Span::styled(
                 "⚠ 영구삭제는 복구할 수 없습니다!",
-                Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+                cond_fg_bold(ce, Color::Red),
             ),
         ]),
         Line::from(""),
@@ -254,7 +241,7 @@ pub fn render_purge_confirm(f: &mut Frame, data: &PurgeConfirmData<'_>) {
     for title in data.titles.iter().take(show) {
         lines.push(Line::from(vec![
             Span::raw("    · "),
-            Span::styled(title.as_str(), Style::default().fg(Color::White)),
+            Span::raw(title.as_str()),
         ]));
     }
     if data.titles.len() > 5 {
@@ -262,7 +249,7 @@ pub fn render_purge_confirm(f: &mut Frame, data: &PurgeConfirmData<'_>) {
             Span::raw("    "),
             Span::styled(
                 format!("... 외 {}개", data.titles.len() - 5),
-                Style::default().fg(Color::DarkGray),
+                cond_fg(ce, Color::DarkGray),
             ),
         ]));
     }
@@ -272,13 +259,13 @@ pub fn render_purge_confirm(f: &mut Frame, data: &PurgeConfirmData<'_>) {
         Span::raw("  "),
         Span::styled(
             "확인하려면 DELETE 를 입력하세요:",
-            Style::default().fg(Color::Yellow),
+            cond_fg(ce, Color::Yellow),
         ),
     ]));
     lines.push(Line::from(vec![
         Span::raw("  > "),
-        Span::styled(data.input, Style::default().fg(Color::White)),
-        Span::styled("│", Style::default().fg(Color::White)),
+        Span::raw(data.input),
+        Span::raw("│"),
     ]));
     lines.push(Line::from(""));
 
@@ -286,18 +273,15 @@ pub fn render_purge_confirm(f: &mut Frame, data: &PurgeConfirmData<'_>) {
     lines.push(Line::from(vec![
         Span::raw("      "),
         if ready {
-            Span::styled(
-                "[Enter] 영구삭제",
-                Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
-            )
+            Span::styled("[Enter] 영구삭제", cond_fg_bold(ce, Color::Red))
         } else {
             Span::styled(
                 "[Enter] 영구삭제 (DELETE 입력 후)",
-                Style::default().fg(Color::DarkGray),
+                cond_fg(ce, Color::DarkGray),
             )
         },
         Span::raw("    "),
-        Span::styled("[Esc] 취소", Style::default().fg(Color::DarkGray)),
+        Span::styled("[Esc] 취소", cond_fg(ce, Color::DarkGray)),
     ]));
     lines.push(Line::from(""));
 
@@ -313,11 +297,14 @@ pub struct AliasEditData<'a> {
     pub original_title: &'a str,
     /// 현재 입력 중인 별칭 문자열
     pub input: &'a str,
+    /// T11.3 색상 활성 여부
+    pub color_enabled: bool,
 }
 
 /// 별칭 지정/편집 모달 렌더 (FR-06 §3.6)
 /// Enter = 저장 (빈칸 = 별칭 삭제), Esc = 취소
 pub fn render_alias_edit(f: &mut Frame, data: &AliasEditData<'_>) {
+    let ce = data.color_enabled;
     let height = 9u16;
     let area = centered_rect(60, height, f.area());
 
@@ -327,11 +314,9 @@ pub fn render_alias_edit(f: &mut Frame, data: &AliasEditData<'_>) {
         .borders(Borders::ALL)
         .title(Span::styled(
             " 별칭 지정/편집 ",
-            Style::default()
-                .fg(Color::Cyan)
-                .add_modifier(Modifier::BOLD),
+            cond_fg_bold(ce, Color::Cyan),
         ))
-        .border_style(Style::default().fg(Color::Cyan));
+        .border_style(cond_fg(ce, Color::Cyan));
 
     let inner = block.inner(area);
     f.render_widget(block, area);
@@ -340,25 +325,23 @@ pub fn render_alias_edit(f: &mut Frame, data: &AliasEditData<'_>) {
         Line::from(""),
         Line::from(vec![
             Span::raw("  원본 제목: "),
-            Span::styled(data.original_title, Style::default().fg(Color::DarkGray)),
+            Span::styled(data.original_title, cond_fg(ce, Color::DarkGray)),
         ]),
         Line::from(""),
         Line::from(vec![
             Span::raw("  > "),
-            Span::styled(data.input, Style::default().fg(Color::White)),
-            Span::styled("│", Style::default().fg(Color::White)),
+            Span::raw(data.input),
+            Span::raw("│"),
         ]),
         Line::from(""),
         Line::from(vec![
             Span::raw("  "),
             Span::styled(
                 "[Enter] 저장 (빈칸=별칭 삭제)",
-                Style::default()
-                    .fg(Color::Green)
-                    .add_modifier(Modifier::BOLD),
+                cond_fg_bold(ce, Color::Green),
             ),
             Span::raw("  "),
-            Span::styled("[Esc] 취소", Style::default().fg(Color::DarkGray)),
+            Span::styled("[Esc] 취소", cond_fg(ce, Color::DarkGray)),
         ]),
         Line::from(""),
     ];

@@ -9,7 +9,7 @@ use ratatui::{
 use super::layout::centered_rect;
 
 pub fn render_help(f: &mut Frame) {
-    let area = centered_rect(58, 32, f.area());
+    let area = centered_rect(58, 34, f.area());
 
     f.render_widget(Clear, area);
 
@@ -116,6 +116,12 @@ pub fn render_help(f: &mut Frame) {
         Line::from(vec![
             Span::styled("  p    ", Style::default().fg(Color::Cyan)),
             Span::raw("미리보기 패널 토글 (≥100칸 필요, Normal 모드 전용)"),
+        ]),
+        Line::from(""),
+        // 설정 (FR-10)
+        Line::from(vec![
+            Span::styled("  ,    ", Style::default().fg(Color::Cyan)),
+            Span::raw("설정 화면 열기 (테마·정렬·경로 등)"),
         ]),
         Line::from(""),
         Line::from(vec![

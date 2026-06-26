@@ -3,6 +3,8 @@ mod layout;
 mod list;
 mod modal;
 mod preview;
+mod settings;
+mod theme;
 mod time;
 mod trash_view;
 
@@ -17,6 +19,7 @@ use std::collections::HashSet;
 use std::io::stdout;
 use std::time::Duration;
 
+use crate::config::{expand_tilde, Config};
 use crate::preview::{read_preview, PreviewContent, MAX_PREVIEW_BYTES, MAX_PREVIEW_LINES};
 use crate::service::{exec_resume, resume_session, AppState, DisplayRow, ResumeResult};
 
@@ -35,6 +38,7 @@ use modal::{
     render_age_select, render_alias_edit, render_delete_confirm, render_purge_confirm,
     AgeSelectData, AliasEditData, DeleteConfirmData, PurgeConfirmData,
 };
+use settings::{render_settings, SettingsData, SETTINGS_ROW_COUNT};
 use trash_view::render_trash;
 
 /// FR-14: 오래된 세션 선택 모달의 기준 일수 프리셋
@@ -60,10 +64,14 @@ enum UiMode {
     AliasEdit,
     /// 오래된 세션 선택 모달 (o, FR-14)
     AgeSelect,
+    /// 설정 화면 (`,`, FR-10 T11.2)
+    Settings,
 }
 
 pub struct App {
     state: AppState,
+    /// 런타임 설정 (T11.2 저장 대상, T11.3 색상 제어)
+    config: Config,
     /// 현재 UI 모드
     mode: UiMode,
     /// 필터된 인덱스 목록 내에서의 커서 위치
@@ -121,12 +129,24 @@ pub struct App {
     age_cursor: usize,
     /// 프리셋별 대상 세션 수(모달 열 때 계산, AGE_PRESET_DAYS와 동일 순서)
     age_counts: Vec<usize>,
+
+    // ── FR-10 T11.2: 설정 화면 상태 ──────────────────────────────────────
+    /// 설정 화면 편집용 임시 복사본. `s` 저장 시 config에 반영.
+    settings_draft: Config,
+    /// 설정 화면 내 커서 위치 (0=Projects root … 5=Theme)
+    settings_cursor: usize,
+    /// Projects root 인라인 경로 편집 서브모드 여부
+    settings_path_editing: bool,
+    /// 경로 편집 버퍼
+    settings_path_input: String,
 }
 
 impl App {
-    pub fn new(state: AppState) -> Self {
+    pub fn new(state: AppState, config: Config) -> Self {
+        let settings_draft = config.clone();
         App {
             state,
+            config,
             mode: UiMode::Normal,
             cursor: 0,
             show_help: false,
@@ -156,6 +176,11 @@ impl App {
 
             age_cursor: 0,
             age_counts: vec![],
+
+            settings_draft,
+            settings_cursor: 0,
+            settings_path_editing: false,
+            settings_path_input: String::new(),
         }
     }
 
@@ -210,6 +235,8 @@ impl App {
     ) -> Result<()> {
         loop {
             terminal.draw(|f| {
+                let color_enabled = self.config.color_enabled();
+                let time_format = self.config.time_format;
                 if self.show_help {
                     render_help(f);
                 } else {
@@ -233,10 +260,13 @@ impl App {
                                 preview_content,
                                 &preview_title,
                                 &preview_path,
+                                color_enabled,
+                                time_format,
                             );
                             let data = DeleteConfirmData {
                                 titles: &self.delete_titles,
                                 active_count: self.delete_active_count,
+                                color_enabled,
                             };
                             render_delete_confirm(f, &data);
                         }
@@ -246,6 +276,7 @@ impl App {
                             let data = PurgeConfirmData {
                                 titles: &self.purge_titles,
                                 input: &self.purge_input,
+                                color_enabled,
                             };
                             render_purge_confirm(f, &data);
                         }
@@ -264,10 +295,13 @@ impl App {
                                 preview_content,
                                 &preview_title,
                                 &preview_path,
+                                color_enabled,
+                                time_format,
                             );
                             let data = AliasEditData {
                                 original_title: &self.alias_target_title,
                                 input: &self.alias_input,
+                                color_enabled,
                             };
                             render_alias_edit(f, &data);
                         }
@@ -286,6 +320,8 @@ impl App {
                                 preview_content,
                                 &preview_title,
                                 &preview_path,
+                                color_enabled,
+                                time_format,
                             );
                             // (기준 일수, 대상 수) 쌍으로 모달에 전달
                             let options: Vec<(u64, usize)> = AGE_PRESET_DAYS
@@ -296,8 +332,37 @@ impl App {
                             let data = AgeSelectData {
                                 options: &options,
                                 cursor: self.age_cursor,
+                                color_enabled,
                             };
                             render_age_select(f, &data);
+                        }
+                        UiMode::Settings => {
+                            // 배경: 현재 목록을 뒤에 그리고 모달 오버레이
+                            let preview_content = self.current_preview_content();
+                            let preview_title = self.current_session_title();
+                            let preview_path = self.current_session_cwd();
+                            render_list(
+                                f,
+                                &self.state,
+                                self.cursor,
+                                false,
+                                &self.state.selected_ids.clone(),
+                                self.status_message.as_deref(),
+                                self.preview_open,
+                                preview_content,
+                                &preview_title,
+                                &preview_path,
+                                color_enabled,
+                                time_format,
+                            );
+                            let data = SettingsData {
+                                draft: &self.settings_draft,
+                                cursor: self.settings_cursor,
+                                path_editing: self.settings_path_editing,
+                                path_input: &self.settings_path_input,
+                                color_enabled,
+                            };
+                            render_settings(f, &data);
                         }
                         _ => {
                             let search_mode = self.mode == UiMode::Search;
@@ -315,6 +380,8 @@ impl App {
                                 preview_content,
                                 &preview_title,
                                 &preview_path,
+                                color_enabled,
+                                time_format,
                             );
                         }
                     }
@@ -353,6 +420,7 @@ impl App {
             UiMode::Search => return self.handle_search_key(code),
             UiMode::AliasEdit => return self.handle_alias_edit_key(code),
             UiMode::AgeSelect => return self.handle_age_select_key(code),
+            UiMode::Settings => return self.handle_settings_key(code),
             UiMode::Normal => {}
         }
 
@@ -516,6 +584,11 @@ impl App {
                         self.clamp_cursor();
                     }
                 }
+            }
+
+            // ── FR-10 T11.2: 설정 화면 열기 (`,`) ───────────────────────────
+            KeyCode::Char(',') => {
+                self.open_settings();
             }
 
             // ── FR-06: 별칭 지정/편집 (n) ────────────────────────────────────
@@ -827,6 +900,174 @@ impl App {
         self.alias_target_id = None;
         self.alias_target_title.clear();
         self.mode = UiMode::Normal;
+    }
+
+    // ── FR-10 T11.2: 설정 화면 키 처리 ──────────────────────────────────
+
+    /// 설정 화면 열기 — draft를 현재 config 복사본으로 초기화
+    fn open_settings(&mut self) {
+        self.settings_draft = self.config.clone();
+        self.settings_cursor = 0;
+        self.settings_path_editing = false;
+        self.settings_path_input = self
+            .settings_draft
+            .projects_root
+            .to_string_lossy()
+            .to_string();
+        self.mode = UiMode::Settings;
+    }
+
+    /// 설정 화면 키 핸들러
+    fn handle_settings_key(&mut self, code: KeyCode) -> Result<bool> {
+        // ── 경로 편집 서브모드 ──────────────────────────────────────────
+        if self.settings_path_editing {
+            match code {
+                KeyCode::Enter => {
+                    // 입력 버퍼를 draft의 projects_root에 반영 후 서브모드 종료
+                    self.settings_draft.projects_root = expand_tilde(&self.settings_path_input);
+                    self.settings_path_editing = false;
+                }
+                KeyCode::Esc => {
+                    // 취소 — 버퍼를 draft 현재 값으로 리셋
+                    self.settings_path_input = self
+                        .settings_draft
+                        .projects_root
+                        .to_string_lossy()
+                        .to_string();
+                    self.settings_path_editing = false;
+                }
+                KeyCode::Backspace => {
+                    self.settings_path_input.pop();
+                }
+                KeyCode::Char(c) => {
+                    self.settings_path_input.push(c);
+                }
+                _ => {}
+            }
+            return Ok(false);
+        }
+
+        // ── 일반 설정 키 ─────────────────────────────────────────────────
+        match code {
+            KeyCode::Esc => {
+                // 저장 없이 닫기 (draft 폐기)
+                self.mode = UiMode::Normal;
+            }
+            KeyCode::Char('s') => {
+                // 저장: 파일에 먼저 쓰고, 성공했을 때만 런타임 config 반영.
+                // (실패 시 self.config는 그대로 둬 파일과 런타임 상태가 어긋나지 않게)
+                match self.settings_draft.save() {
+                    Ok(()) => {
+                        self.config = self.settings_draft.clone();
+                        // default_sort 즉시 재정렬 반영 (다음 실행뿐 아니라 지금도 적용)
+                        let new_sort = crate::service::SortState {
+                            key: self.config.default_sort.key,
+                            dir: self.config.default_sort.dir,
+                        };
+                        self.state.sort = new_sort;
+                        crate::service::apply_sort(&mut self.state.sessions, new_sort);
+                        self.cursor = 0;
+                        self.status_message = Some("설정을 저장했습니다".to_string());
+                    }
+                    Err(e) => {
+                        self.status_message = Some(format!("설정 저장 실패: {e}"));
+                    }
+                }
+                self.mode = UiMode::Normal;
+            }
+            KeyCode::Up | KeyCode::Char('k') => {
+                if self.settings_cursor > 0 {
+                    self.settings_cursor -= 1;
+                }
+            }
+            KeyCode::Down | KeyCode::Char('j') => {
+                if self.settings_cursor + 1 < SETTINGS_ROW_COUNT {
+                    self.settings_cursor += 1;
+                }
+            }
+            KeyCode::Left => {
+                self.settings_apply_prev();
+            }
+            KeyCode::Right => {
+                self.settings_apply_next();
+            }
+            KeyCode::Enter => {
+                match self.settings_cursor {
+                    0 => {
+                        // Projects root: Enter → 인라인 경로 편집 진입
+                        self.settings_path_input = self
+                            .settings_draft
+                            .projects_root
+                            .to_string_lossy()
+                            .to_string();
+                        self.settings_path_editing = true;
+                    }
+                    1 => {
+                        // Default sort: Enter → 방향 토글 (←→는 키 순환에 사용)
+                        self.settings_draft.default_sort.dir =
+                            self.settings_draft.default_sort.dir.toggle();
+                    }
+                    _ => {
+                        // 나머지 enum/숫자 항목: Enter = next (Right와 동일)
+                        self.settings_apply_next();
+                    }
+                }
+            }
+            _ => {}
+        }
+        Ok(false)
+    }
+
+    /// 현재 커서 항목을 다음 값으로 변경 (Right/Enter 공용)
+    fn settings_apply_next(&mut self) {
+        match self.settings_cursor {
+            0 => {
+                // Projects root: Enter로 편집 진입; Right로는 아무것도 하지 않음
+            }
+            1 => {
+                self.settings_draft.default_sort.key = self.settings_draft.default_sort.key.next();
+            }
+            2 => {
+                self.settings_draft.time_format = self.settings_draft.time_format.next();
+            }
+            3 => {
+                self.settings_draft.resume_mode = self.settings_draft.resume_mode.next();
+            }
+            4 => {
+                self.settings_draft.trash_retention_days =
+                    self.settings_draft.trash_retention_days.saturating_add(1);
+            }
+            5 => {
+                self.settings_draft.theme = self.settings_draft.theme.next();
+            }
+            _ => {}
+        }
+    }
+
+    /// 현재 커서 항목을 이전 값으로 변경 (Left 전용)
+    fn settings_apply_prev(&mut self) {
+        match self.settings_cursor {
+            0 => {
+                // Projects root: 경로 편집은 Enter로만 진입
+            }
+            1 => {
+                self.settings_draft.default_sort.key = self.settings_draft.default_sort.key.prev();
+            }
+            2 => {
+                self.settings_draft.time_format = self.settings_draft.time_format.prev();
+            }
+            3 => {
+                self.settings_draft.resume_mode = self.settings_draft.resume_mode.prev();
+            }
+            4 => {
+                self.settings_draft.trash_retention_days =
+                    self.settings_draft.trash_retention_days.saturating_sub(1);
+            }
+            5 => {
+                self.settings_draft.theme = self.settings_draft.theme.prev();
+            }
+            _ => {}
+        }
     }
 
     // ── 내부 동작 헬퍼 ────────────────────────────────────────────────────

@@ -5,6 +5,27 @@
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-06-26
+
+### Added (M3 완성 — 설정 FR-10)
+- **설정 파일(`config.toml`):** `~/.claude/claudedesk/config.toml`에서 기본 동작을 읽는다. 없으면 기본값으로 **원자적 생성**(temp→rename). 손상·부분 누락 TOML은 `serde(default)`로 graceful 폴백 — 패닉 없이 기본값 복원. 기록 위치는 `projects/`와 **분리된 디렉토리**라 원본 세션 JSONL은 손도 대지 않는다.
+- **인앱 설정 화면(`,` 키):** Projects root / Default sort / Time format / Resume mode / Trash retention / Theme를 ↑↓ 이동·←→·Enter 토글·`s` 저장·Esc 닫기로 편집. draft 복사본에 변경을 누적했다가 `s`에서만 영속 — 저장 성공 시에만 런타임 반영(쓰기 실패 시 파일/런타임 불일치 방지).
+- **CLI 오버라이드:** `--root` / `--sort` / `--no-color` / `--config` / `--verbose`가 설정 파일 값을 덮어쓴다.
+- **테마/접근성:** `color_enabled()`(Theme=Mono 또는 `NO_COLOR` 환경변수) 경유. 무색 모드에서도 목록·설정·모달 전부 텍스트 마커(●/✓/▸/⚠)로 식별 가능(§5.7 색 무관 원칙).
+- **default_sort·time_format 배선:** 초기 정렬을 설정값으로 적용(저장 즉시 재정렬), 시간 표기는 Relative(한국어)/Absolute(로컬 ISO) 디스패치로 목록에 즉시 반영.
+
+### Safety
+- **원본 JSONL 불변:** 설정은 별도 `config.toml`에만 기록 — 원본 `*.jsonl`은 읽기조차 변경 0. 픽스처 SHA-256 불변 회귀 8종으로 강제.
+
+### Deferred (문서화된 의도적 보류)
+- `resume_mode=spawn` 배선(PRD Could·저신뢰 — handoff 유지), light 테마 팔레트(dark와 동일, 최소 구현).
+
+### Tests
+- config 유닛(기본생성·파싱·라운드트립·CLI 우선순위·color_enabled) + 설정화면/시간 유닛. 총 144 테스트(유닛 94 + 통합 50) 통과, clippy `-D warnings`·fmt 그린.
+
+### Milestone
+- 이로써 **M3(편의 기능 — FR-06 별칭 / FR-08 미리보기 / FR-10 설정 / FR-14 오래된 세션 정리) 전부 구현 완료.**
+
 ## [0.9.0] - 2026-06-26
 
 ### Added (하우스키핑 — 날짜 기준 오래된 세션 정리 FR-14)
