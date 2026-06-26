@@ -9,7 +9,7 @@ use ratatui::{
 use super::layout::centered_rect;
 
 pub fn render_help(f: &mut Frame) {
-    let area = centered_rect(58, 30, f.area());
+    let area = centered_rect(58, 32, f.area());
 
     f.render_widget(Clear, area);
 
@@ -77,6 +77,10 @@ pub fn render_help(f: &mut Frame) {
             Span::styled("  Del/d", Style::default().fg(Color::Red)),
             Span::raw("  삭제 확인 모달 → 휴지통 이동"),
         ]),
+        Line::from(vec![
+            Span::styled("  o    ", Style::default().fg(Color::Red)),
+            Span::raw("  오래된 세션 선택(기준일 이전) → d로 삭제 (FR-14)"),
+        ]),
         Line::from(""),
         // 휴지통 (FR-11)
         Line::from(vec![
@@ -100,6 +104,12 @@ pub fn render_help(f: &mut Frame) {
         Line::from(vec![
             Span::styled("  Tab  ", Style::default().fg(Color::Blue)),
             Span::raw("현재 그룹 접기/펼치기 토글"),
+        ]),
+        Line::from(""),
+        // 별칭 (FR-06)
+        Line::from(vec![
+            Span::styled("  n    ", Style::default().fg(Color::Cyan)),
+            Span::raw("별칭 지정/편집 (빈칸 저장=삭제)"),
         ]),
         Line::from(""),
         // 미리보기 (FR-08)

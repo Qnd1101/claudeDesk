@@ -35,6 +35,7 @@ pub fn render_list(
     preview_open: bool,
     preview_content: Option<&PreviewContent>,
     preview_title: &str,
+    preview_path: &str,
 ) {
     let full_area = f.area();
 
@@ -178,6 +179,7 @@ pub fn render_list(
             selected_ids,
             status_message,
             preview_open && preview_area_opt.is_some(),
+            "",
         );
         return;
     }
@@ -201,6 +203,7 @@ pub fn render_list(
             selected_ids,
             status_message,
             preview_open && preview_area_opt.is_some(),
+            "",
         );
         return;
     }
@@ -273,10 +276,16 @@ pub fn render_list(
                         (false, false, false) => "  ",
                     };
 
+                    // FR-06: display_title() 우선 + 별칭 마커 (§5.7: 텍스트 마커 필수)
+                    let display = session.display_title();
+                    let has_alias = session.alias.is_some();
+                    let alias_marker = if has_alias { "~ " } else { "" };
                     let title_text = if state.grouped {
-                        format!("  {}", safe_truncate(&session.title, 38))
+                        let trunc_w = if has_alias { 36 } else { 38 };
+                        format!("  {}{}", alias_marker, safe_truncate(display, trunc_w))
                     } else {
-                        safe_truncate(&session.title, 40)
+                        let trunc_w = if has_alias { 38 } else { 40 };
+                        format!("{}{}", alias_marker, safe_truncate(display, trunc_w))
                     };
 
                     let modified = relative_time(&session.modified);
@@ -342,11 +351,12 @@ pub fn render_list(
         selected_ids,
         status_message,
         preview_open && preview_area_opt.is_some(),
+        preview_path,
     );
 
     // ── FR-08: 미리보기 패널 렌더 ────────────────────────────────────────
     if let (Some(preview_area), Some(content)) = (preview_area_opt, preview_content) {
-        render_preview(f, preview_area, content, preview_title);
+        render_preview(f, preview_area, content, preview_title, preview_path);
     }
 }
 
@@ -387,6 +397,7 @@ fn render_statusbar(
     selected_ids: &HashSet<String>,
     status_message: Option<&str>,
     preview_active: bool,
+    cursor_path: &str,
 ) {
     let mut spans = vec![];
 
@@ -444,11 +455,22 @@ fn render_statusbar(
             Style::default().fg(Color::Cyan),
         ));
     } else {
-        let mut hint = " ↑↓/jk 이동  Enter 이어하기  / 검색  s 정렬  g 그룹".to_string();
+        // ① 커서 세션의 작업 폴더 풀경로(중간 생략)를 힌트 앞에 항상 노출.
+        //    미리보기를 열지 않아도 "어느 폴더에서 쓴 세션인지" 바로 보이게.
+        if !cursor_path.is_empty() {
+            spans.push(Span::styled(
+                format!(" {} ", middle_truncate(cursor_path, 50)),
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD),
+            ));
+            spans.push(Span::raw("| "));
+        }
+        let mut hint = " ↑↓/jk 이동  Enter 이어하기  n 별칭  / 검색  s 정렬  g 그룹".to_string();
         if state.grouped {
             hint.push_str("  Tab 접기/펼치기");
         }
-        hint.push_str("  p 미리보기  Space 선택  a 전체선택  Del 삭제  T 휴지통  ? 도움말  q 종료");
+        hint.push_str("  p 미리보기  Space 선택  a 전체선택  o 오래된선택  Del 삭제  T 휴지통  ? 도움말  q 종료");
         spans.push(Span::styled(hint, Style::default().fg(Color::DarkGray)));
     }
 
@@ -480,6 +502,50 @@ pub fn safe_truncate(s: &str, max_width: usize) -> String {
     result
 }
 
+/// 경로 등 양끝이 모두 중요한 문자열을 중간 생략(`앞…뒤`)으로 줄인다(①).
+/// max_width 이하면 원본 그대로. 폭은 유니코드 표시폭 기준.
+pub fn middle_truncate(s: &str, max_width: usize) -> String {
+    if UnicodeWidthStr::width(s) <= max_width {
+        return s.to_string();
+    }
+    if max_width <= 1 {
+        return "…".to_string();
+    }
+    // 말줄임표(1)를 뺀 예산을 앞뒤로 분배(뒤쪽=leaf을 더 길게).
+    let budget = max_width - 1;
+    let tail_budget = budget.div_ceil(2);
+    let head_budget = budget - tail_budget;
+
+    let take_prefix = |budget: usize| -> String {
+        let mut width = 0usize;
+        let mut out = String::new();
+        for c in s.chars() {
+            let cw = UnicodeWidthStr::width(c.encode_utf8(&mut [0u8; 4]));
+            if width + cw > budget {
+                break;
+            }
+            width += cw;
+            out.push(c);
+        }
+        out
+    };
+    let take_suffix = |budget: usize| -> String {
+        let mut width = 0usize;
+        let mut rev = String::new();
+        for c in s.chars().rev() {
+            let cw = UnicodeWidthStr::width(c.encode_utf8(&mut [0u8; 4]));
+            if width + cw > budget {
+                break;
+            }
+            width += cw;
+            rev.push(c);
+        }
+        rev.chars().rev().collect()
+    };
+
+    format!("{}…{}", take_prefix(head_budget), take_suffix(tail_budget))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -503,5 +569,22 @@ mod tests {
     fn test_safe_truncate_no_truncate() {
         let s = "short";
         assert_eq!(safe_truncate(s, 20), "short");
+    }
+
+    #[test]
+    fn test_middle_truncate_no_truncate() {
+        let s = "/home/user/proj";
+        assert_eq!(middle_truncate(s, 50), s);
+    }
+
+    #[test]
+    fn test_middle_truncate_keeps_both_ends() {
+        // 앞 루트와 뒤 leaf 모두 보존 + 폭 예산 준수
+        let s = "/Users/minjun/Dev/some/very/deep/nested/claudeDesk";
+        let t = middle_truncate(s, 20);
+        assert!(UnicodeWidthStr::width(t.as_str()) <= 20);
+        assert!(t.contains('…'));
+        assert!(t.starts_with('/')); // 앞부분(루트) 보존
+        assert!(t.ends_with("Desk")); // 뒷부분(leaf) 보존
     }
 }
