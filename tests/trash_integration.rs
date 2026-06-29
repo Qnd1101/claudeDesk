@@ -515,6 +515,7 @@ fn test_sort_and_filter_regression() {
         aliases: claudedesk::alias::AliasStore::default(),
         facet: claudedesk::facet::Facet::Recent,
         launch_cwd: "/tmp".to_string(),
+        cursor_identity: None,
     };
     let idx = state.filtered_indices();
     assert_eq!(idx.len(), 1, "검색 결과가 1개여야 함");
