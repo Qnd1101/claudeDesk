@@ -5,6 +5,33 @@
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-06-29
+
+### Added (Facet 2-pane UI 재설계)
+- **Health 분류(stale_cutoff 90일):** `Health` enum(Active/Empty/Stale/Zombie) + `classify()` 순수 함수로 세션 상태를 자동 분류. 90일 이상 수정되지 않은 비활성 세션을 `Stale`로 표시, 빈 세션은 `Empty`, 현재 이용 중이면 `Active`, 복구 불가능(원본 경로 삭제됨)하면 `Zombie`.
+- **Facet 뷰:**  `Facet` enum(Recent/Active/Cleanup/Project) + `facet_indices()`·`matches()`·`counts()` 유틸로 세션을 4개 탭으로 분류. 추가로 `cursor_identity` anchor 구현으로 탭 전환 후 커서 위치 유지.
+- **2-pane 레이아웃:** `src/ui/facet_view.rs`로 화면 크기별 반응형 레이아웃 — single(<90) / narrow(<120) / full(≥120). 좌측 facet 탭바(1~4로 직접 점프 + Tab/Shift+Tab 순환), 우측 세션 목록 패널. 단일 탭 모드(narrow/single)에서도 탭 표시로 탐색 지원.
+- **Health 아이콘:** 목록에서 각 세션 앞에 health 상태를 시각 마커(`●` Active / `⏰` Stale / `○` Empty / `💀` Zombie)로 표시(색 무관, 텍스트 기반 식별).
+- **설정 통합:** `src/config.rs`에 `stale_days`(기본 90) + `default_facet` 필드 추가로 기준일과 초기 탭을 커스터마이징 가능.
+- **키 바인딩:** `Tab`/`Shift+Tab`으로 facet 순환, `1`~`4` 키로 Recent/Active/Cleanup/Project 직접 점프.
+- **FS 자동 감지(auto-reload):** notify 6.x watcher가 `~/.claude/projects/` 변경을 감시. 300ms 디바운스 후 세션 목록 자동 갱신 — 탭/커서/검색/정렬 상태 유지, `cursor_identity`로 커서 복원.
+- **`--facet` CLI 인자:** `claudedesk --facet recent|active|cleanup|project`로 시작 탭 지정 (미지정 시 `config.toml`의 `default_facet`).
+- **Service 배선:** `src/service.rs`에서 health 분류 패스 + `restore_cursor()` + `start_watcher()` 구현으로 렌더링 성능과 탐색 UX 개선.
+- **Domain 확장:** `src/domain.rs`의 `Session`에 `health` 필드 추가.
+
+### Tests
+- facet 분류 유닛 테스트(4개 카테고리·경계일·cursor 보존) + health 분류 회귀(Stale/Active/Empty/Zombie) + 레이아웃 반응성 테스트 추가. 총 168 테스트 통과, clippy `-D warnings`·fmt 그린.
+
+## [0.11.0] - 2026-06-26
+
+### Changed (CI / 비대화 모드 / resume)
+- **GitHub Actions checkout v4→v5:** Node20 deprecation 대응. 빌드 파이프라인 최신화.
+- **비대화 모드(`--list`):** 명령줄에서 `claudedesk --list`로 7컬럼 TSV 형식(ID/Title/Cwd/Modified/Status/Health/Project)을 stdout으로 출력. TUI 없이 스크립트/파이프 조회 지원.
+- **`resume_mode=spawn` 구현:** `config.toml`에서 `resume_mode = "spawn"` 설정 시 세션 재개를 `claude --resume` 대신 새로운 spawn 기반 메커니즘으로 실행. 기존 handoff 제어 흐름은 유지하되, 프로세스 생성 방식을 교체.
+
+### Tests
+- CLI 출력(`--list` TSV 포맷) 통합 테스트 2종 + resume_mode 선택 로직 유닛 1종. 기존 86 테스트 유지, 회귀 0.
+
 ## [0.10.0] - 2026-06-26
 
 ### Added (M3 완성 — 설정 FR-10)

@@ -2,6 +2,8 @@ pub mod alias;
 pub mod config;
 pub mod data;
 pub mod domain;
+pub mod facet;
+pub mod health;
 pub mod parser;
 pub mod preview;
 pub mod service;
