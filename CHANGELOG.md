@@ -14,7 +14,8 @@
 - **Health 아이콘:** 목록에서 각 세션 앞에 health 상태를 시각 마커(`●` Active / `◐` Stale / `◯` Empty / `⚠` Zombie)로 표시(색 무관, 텍스트 기반 식별).
 - **설정 통합:** `src/config.rs`에 `stale_days`(기본 90) + `default_facet` 필드 추가로 기준일과 초기 탭을 커스터마이징 가능.
 - **키 바인딩:** `Tab`/`Shift+Tab`으로 facet 순환, `1`~`4` 키로 Recent/Active/Cleanup/Project 직접 점프.
-- **의존성:** notify 6.x 추가(파일 시스템 이벤트 감시용 `start_watcher()`).
+- **FS 자동 감지(auto-reload):** notify 6.x watcher가 `~/.claude/projects/` 변경을 감시. 300ms 디바운스 후 세션 목록 자동 갱신 — 탭/커서/검색/정렬 상태 유지, `cursor_identity`로 커서 복원.
+- **`--facet` CLI 인자:** `claudedesk --facet recent|active|cleanup|project`로 시작 탭 지정 (미지정 시 `config.toml`의 `default_facet`).
 - **Service 배선:** `src/service.rs`에서 health 분류 패스 + `restore_cursor()` + `start_watcher()` 구현으로 렌더링 성능과 탐색 UX 개선.
 - **Domain 확장:** `src/domain.rs`의 `Session`에 `health` 필드 추가.
 
