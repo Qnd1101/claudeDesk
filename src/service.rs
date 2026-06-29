@@ -1,10 +1,22 @@
 use anyhow::{Context, Result};
 use std::process::Command;
+use std::time::{Duration, SystemTime};
 
 use crate::config::Config;
 use crate::data::discover_sessions;
 use crate::domain::Session;
 use crate::parser::{build_search_text, build_session, parse_session};
+
+// ── health 분류 (FR-10 정리 기능, T3) ─────────────────────────────────────────
+
+/// 세션 Vec의 health 필드를 실제로 분류 (in-place).
+/// stale_cutoff 이전에 수정된 세션은 Stale로, 기타는 classify()로 판정.
+fn classify_all_health(sessions: &mut [Session], stale_cutoff: SystemTime) {
+    for s in sessions.iter_mut() {
+        let cwd_exists = std::path::Path::new(&s.cwd).is_dir();
+        s.health = crate::health::classify(s.msg_count, cwd_exists, s.modified, stale_cutoff);
+    }
+}
 
 // ── 정렬 (FR-07) ─────────────────────────────────────────────────────────────
 // SortKey, SortDir は config.rs で定義 (serde + FR-10 設定レイヤー)。
@@ -92,7 +104,7 @@ impl SessionService {
         Self { config }
     }
 
-    /// 세션 목록 빌드: 디스커버리 → 파싱 → 별칭 주입 → 정렬 적용
+    /// 세션 목록 빌드: 디스커버리 → 파싱 → 별칭 주입 → health 분류 → 정렬 적용
     pub fn load_sessions(
         &self,
         sort: SortState,
@@ -124,6 +136,12 @@ impl SessionService {
                 }
             }
         }
+
+        // T3: health 분류 (FR-10 정리 기능)
+        let stale_cutoff = SystemTime::now()
+            .checked_sub(Duration::from_secs(self.config.stale_days as u64 * 86400))
+            .unwrap_or(SystemTime::UNIX_EPOCH);
+        classify_all_health(&mut sessions, stale_cutoff);
 
         apply_sort(&mut sessions, sort);
 
@@ -169,6 +187,12 @@ pub struct AppState {
     pub collapsed_projects: std::collections::HashSet<String>,
     /// 별칭 사이드카 (FR-06). 편집 시 메모리 갱신 + 즉시 save.
     pub aliases: crate::alias::AliasStore,
+    /// 현재 좌측 facet (FR-15, 기본 config.default_facet)
+    pub facet: crate::facet::Facet,
+    /// 실행 디렉토리 (Project facet/우측 기본용, FR-15)
+    pub launch_cwd: String,
+    /// 현재 선택 세션의 session_id (facet 전환/reload 후 커서 복원용, T4)
+    pub cursor_identity: Option<String>,
 }
 
 impl AppState {
@@ -180,6 +204,7 @@ impl AppState {
             dir: service.config.default_sort.dir,
         };
         let (sessions, stats) = service.load_sessions(sort, &aliases)?;
+        let launch_cwd = std::env::current_dir()?.to_string_lossy().to_string();
         Ok(AppState {
             sessions,
             stats,
@@ -190,6 +215,9 @@ impl AppState {
             grouped: false,
             collapsed_projects: std::collections::HashSet::new(),
             aliases,
+            facet: service.config.default_facet,
+            launch_cwd,
+            cursor_identity: None,
         })
     }
 
@@ -329,6 +357,26 @@ impl AppState {
         ids.len()
     }
 
+    /// cursor_identity 기준으로 display_rows에서 행 번호 반환.
+    /// 없으면 0 (빈 목록이면 None). T4 커서 복원용.
+    pub fn restore_cursor(&self) -> Option<usize> {
+        let id = self.cursor_identity.as_deref()?;
+        let rows = self.display_rows();
+        for (i, row) in rows.iter().enumerate() {
+            if let DisplayRow::Session(idx) = row {
+                if self.sessions[*idx].session_id == id {
+                    return Some(i);
+                }
+            }
+        }
+        // fallback: 첫 번째 행
+        if rows.is_empty() {
+            None
+        } else {
+            Some(0)
+        }
+    }
+
     /// 별칭 설정 + 사이드카 원자적 저장 + 해당 세션 메모리 갱신 (FR-06).
     /// first_user_raw는 메모리에 없으므로 None으로 재조립 (의도적 트레이드오프 — plan §3.5).
     pub fn set_alias(&mut self, session_id: &str, new_alias: &str) -> anyhow::Result<()> {
@@ -423,6 +471,27 @@ pub fn which_claude() -> Option<std::path::PathBuf> {
         }
     }
     None
+}
+
+// ── notify watcher (FR-12, T5) ────────────────────────────────────────────────
+
+use notify::{recommended_watcher, RecursiveMode, Result as NotifyResult, Watcher};
+use std::sync::mpsc::{self, Receiver};
+
+/// notify watcher 시작. mpsc Receiver를 반환 — UI 루프에서 poll.
+/// sender 이벤트: () (변경 감지만; 상세 경로는 reload 후 재계산)
+/// Phase 2에서 UI와 통합될 예정 (현재는 뼈대만 제공).
+pub fn start_watcher(
+    projects_root: &std::path::Path,
+) -> NotifyResult<(notify::RecommendedWatcher, Receiver<()>)> {
+    let (tx, rx) = mpsc::channel();
+    let mut watcher = recommended_watcher(move |res: NotifyResult<notify::Event>| {
+        if res.is_ok() {
+            let _ = tx.send(());
+        }
+    })?;
+    watcher.watch(projects_root, RecursiveMode::Recursive)?;
+    Ok((watcher, rx))
 }
 
 // ── --list 출력 ───────────────────────────────────────────────────────────────
@@ -590,6 +659,7 @@ mod tests {
             skipped_lines: 0,
             alias: None,
             search_text,
+            health: crate::health::Health::Active,
         }
     }
 
@@ -698,6 +768,9 @@ mod tests {
             grouped: false,
             collapsed_projects: std::collections::HashSet::new(),
             aliases: crate::alias::AliasStore::default(),
+            facet: crate::facet::Facet::Recent,
+            launch_cwd: "/tmp".to_string(),
+            cursor_identity: None,
         };
         let idx = state.filtered_indices();
         assert_eq!(idx, vec![0, 1]);
@@ -719,6 +792,9 @@ mod tests {
             grouped: false,
             collapsed_projects: std::collections::HashSet::new(),
             aliases: crate::alias::AliasStore::default(),
+            facet: crate::facet::Facet::Recent,
+            launch_cwd: "/tmp".to_string(),
+            cursor_identity: None,
         };
         let idx = state.filtered_indices();
         assert_eq!(idx, vec![0, 2]);
@@ -739,6 +815,9 @@ mod tests {
             grouped: false,
             collapsed_projects: std::collections::HashSet::new(),
             aliases: crate::alias::AliasStore::default(),
+            facet: crate::facet::Facet::Recent,
+            launch_cwd: "/tmp".to_string(),
+            cursor_identity: None,
         };
         let idx = state.filtered_indices();
         assert_eq!(idx, vec![0]);
@@ -774,6 +853,7 @@ mod tests {
             skipped_lines: 0,
             alias: None,
             search_text,
+            health: crate::health::Health::Active,
         }
     }
 
@@ -811,6 +891,9 @@ mod tests {
             grouped: false,
             collapsed_projects: std::collections::HashSet::new(),
             aliases: crate::alias::AliasStore::default(),
+            facet: crate::facet::Facet::Recent,
+            launch_cwd: "/tmp".to_string(),
+            cursor_identity: None,
         };
         let rows = state.display_rows();
         assert_eq!(rows, vec![DisplayRow::Session(0), DisplayRow::Session(1)]);
@@ -831,6 +914,9 @@ mod tests {
             grouped: true,
             collapsed_projects: std::collections::HashSet::new(),
             aliases: crate::alias::AliasStore::default(),
+            facet: crate::facet::Facet::Recent,
+            launch_cwd: "/tmp".to_string(),
+            cursor_identity: None,
         };
         let rows = state.display_rows();
         // alpha (100 secs ago) is more recent -> alpha first
@@ -864,6 +950,9 @@ mod tests {
             grouped: true,
             collapsed_projects: collapsed,
             aliases: crate::alias::AliasStore::default(),
+            facet: crate::facet::Facet::Recent,
+            launch_cwd: "/tmp".to_string(),
+            cursor_identity: None,
         };
         let rows = state.display_rows();
         assert_eq!(rows.len(), 3);
@@ -907,6 +996,9 @@ mod tests {
             grouped: true,
             collapsed_projects: std::collections::HashSet::new(),
             aliases: crate::alias::AliasStore::default(),
+            facet: crate::facet::Facet::Recent,
+            launch_cwd: "/tmp".to_string(),
+            cursor_identity: None,
         };
         let rows = state.display_rows();
         match &rows[0] {
@@ -930,6 +1022,9 @@ mod tests {
             grouped: true,
             collapsed_projects: std::collections::HashSet::new(),
             aliases: crate::alias::AliasStore::default(),
+            facet: crate::facet::Facet::Recent,
+            launch_cwd: "/tmp".to_string(),
+            cursor_identity: None,
         };
         let rows = state.display_rows();
         assert_eq!(rows.len(), 2);
@@ -967,6 +1062,9 @@ mod tests {
             grouped: false,
             collapsed_projects: std::collections::HashSet::new(),
             aliases: crate::alias::AliasStore::default(),
+            facet: crate::facet::Facet::Recent,
+            launch_cwd: "/tmp".to_string(),
+            cursor_identity: None,
         };
         let idx = state.filtered_indices();
         assert_eq!(
@@ -998,6 +1096,9 @@ mod tests {
             grouped: true,
             collapsed_projects: std::collections::HashSet::new(),
             aliases: crate::alias::AliasStore::default(),
+            facet: crate::facet::Facet::Recent,
+            launch_cwd: "/tmp".to_string(),
+            cursor_identity: None,
         }
     }
 
@@ -1127,6 +1228,9 @@ mod tests {
             grouped: false,
             collapsed_projects: std::collections::HashSet::new(),
             aliases: crate::alias::AliasStore::default(),
+            facet: crate::facet::Facet::Recent,
+            launch_cwd: "/tmp".to_string(),
+            cursor_identity: None,
         }
     }
 
@@ -1186,6 +1290,77 @@ mod tests {
         let cutoff = SystemTime::now() - Duration::from_secs(30 * DAY);
         let ids = state.older_than_ids(cutoff);
         assert_eq!(ids, vec!["docker-old"], "검색에 가려진 세션은 대상 제외");
+    }
+
+    // ── T4: cursor_identity 복원 테스트 ────────────────────────────────────────
+
+    /// cursor_identity가 None이면 restore_cursor는 None을 반환한다.
+    #[test]
+    fn test_restore_cursor_none_identity() {
+        let state = plain_state(vec![make_session("A", 100, 1), make_session("B", 200, 2)]);
+        assert!(state.cursor_identity.is_none());
+        // identity 없으면 복원 대상 없음 — UI가 자체 커서 위치 유지
+        assert_eq!(state.restore_cursor(), None);
+    }
+
+    /// cursor_identity가 설정되고 display_rows에서 찾으면 그 행 번호를 반환한다.
+    #[test]
+    fn test_restore_cursor_found() {
+        let mut state = plain_state(vec![
+            make_session("A", 100, 1),
+            make_session("B", 200, 2),
+            make_session("C", 300, 3),
+        ]);
+        state.cursor_identity = Some("B".to_string());
+        assert_eq!(state.restore_cursor(), Some(1), "B는 인덱스 1");
+    }
+
+    /// cursor_identity가 목록에 없으면 fallback: 첫 번째 행.
+    #[test]
+    fn test_restore_cursor_not_found_fallback() {
+        let mut state = plain_state(vec![make_session("A", 100, 1), make_session("B", 200, 2)]);
+        state.cursor_identity = Some("X".to_string());
+        assert_eq!(
+            state.restore_cursor(),
+            Some(0),
+            "찾지 못하면 첫 행으로 fallback"
+        );
+    }
+
+    /// 빈 목록에서는 cursor_identity 설정 여부와 무관하게 None.
+    #[test]
+    fn test_restore_cursor_empty_list() {
+        let mut state = plain_state(vec![]);
+        state.cursor_identity = Some("A".to_string());
+        assert_eq!(state.restore_cursor(), None, "빈 목록은 None");
+    }
+
+    /// 그룹 모드에서: cursor_identity가 visible 세션에 있으면 display_rows 행 번호로 반환.
+    #[test]
+    fn test_restore_cursor_grouped_mode() {
+        let mut state = AppState {
+            sessions: vec![
+                make_session_with_cwd("S1", "/proj/alpha", 100, 1),
+                make_session_with_cwd("S2", "/proj/beta", 200, 2),
+            ],
+            stats: ScanStats::default(),
+            projects_root: std::path::PathBuf::from("/tmp"),
+            sort: SortState::default(),
+            search_query: None,
+            selected_ids: std::collections::HashSet::new(),
+            grouped: true,
+            collapsed_projects: std::collections::HashSet::new(),
+            aliases: crate::alias::AliasStore::default(),
+            facet: crate::facet::Facet::Recent,
+            launch_cwd: "/tmp".to_string(),
+            cursor_identity: None,
+        };
+        state.cursor_identity = Some("S2".to_string());
+
+        // display_rows: Header(alpha), Session(0), Header(beta), Session(1)
+        // → "S2"는 Session(1)이므로 display_rows 인덱스 3
+        let row_idx = state.restore_cursor();
+        assert_eq!(row_idx, Some(3), "그룹 모드에서 S2는 display_rows 인덱스 3");
     }
 
     // ── format_session_list 유닛 테스트 ──────────────────────────────────────
