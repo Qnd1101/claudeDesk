@@ -11,7 +11,7 @@
 - **Health 분류(stale_cutoff 90일):** `Health` enum(Active/Empty/Stale/Zombie) + `classify()` 순수 함수로 세션 상태를 자동 분류. 90일 이상 수정되지 않은 비활성 세션을 `Stale`로 표시, 빈 세션은 `Empty`, 현재 이용 중이면 `Active`, 복구 불가능(원본 경로 삭제됨)하면 `Zombie`.
 - **Facet 뷰:**  `Facet` enum(Recent/Active/Cleanup/Project) + `facet_indices()`·`matches()`·`counts()` 유틸로 세션을 4개 탭으로 분류. 추가로 `cursor_identity` anchor 구현으로 탭 전환 후 커서 위치 유지.
 - **2-pane 레이아웃:** `src/ui/facet_view.rs`로 화면 크기별 반응형 레이아웃 — single(<90) / narrow(<120) / full(≥120). 좌측 facet 탭바(1~4로 직접 점프 + Tab/Shift+Tab 순환), 우측 세션 목록 패널. 단일 탭 모드(narrow/single)에서도 탭 표시로 탐색 지원.
-- **Health 아이콘:** 목록에서 각 세션 앞에 health 상태를 시각 마커(`●` Active / `◐` Stale / `◯` Empty / `⚠` Zombie)로 표시(색 무관, 텍스트 기반 식별).
+- **Health 아이콘:** 목록에서 각 세션 앞에 health 상태를 시각 마커(`●` Active / `⏰` Stale / `○` Empty / `💀` Zombie)로 표시(색 무관, 텍스트 기반 식별).
 - **설정 통합:** `src/config.rs`에 `stale_days`(기본 90) + `default_facet` 필드 추가로 기준일과 초기 탭을 커스터마이징 가능.
 - **키 바인딩:** `Tab`/`Shift+Tab`으로 facet 순환, `1`~`4` 키로 Recent/Active/Cleanup/Project 직접 점프.
 - **FS 자동 감지(auto-reload):** notify 6.x watcher가 `~/.claude/projects/` 변경을 감시. 300ms 디바운스 후 세션 목록 자동 갱신 — 탭/커서/검색/정렬 상태 유지, `cursor_identity`로 커서 복원.

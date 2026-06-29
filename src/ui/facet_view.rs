@@ -272,14 +272,14 @@ fn render_session_list(
             };
 
             let marker = if is_cursor { ">" } else { " " };
-            let marker_text = format!("{}{}", marker, icon);
 
-            // Cleanup facet에서 stale/zombie는 강조 색상
-            let style_override = if state.facet == Facet::Cleanup
-                && (session.health == Health::Stale || session.health == Health::Zombie)
-            {
-                health_style
-            } else if is_cursor {
+            // marker(>) 또는 공백 + health 아이콘(색상 적용)
+            let marker_span = Span::raw(marker);
+            let icon_span = Span::styled(icon, health_style);
+            let marker_text = Line::from(vec![marker_span, icon_span]);
+
+            // 커서 행은 REVERSED 스타일 적용
+            let style_override = if is_cursor {
                 Style::default().add_modifier(Modifier::REVERSED)
             } else {
                 Style::default()
