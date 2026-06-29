@@ -428,6 +428,7 @@ pub enum ResumeResult {
 /// 실제 프로세스 실행 (TUI 종료 후 호출)
 pub fn exec_resume(cwd: &str, session_id: &str) -> Result<()> {
     let cwd_path = if cwd.is_empty() {
+        log::warn!("Session cwd is empty; resuming from current working directory");
         std::env::current_dir().unwrap_or_default()
     } else {
         std::path::PathBuf::from(cwd)
@@ -451,14 +452,24 @@ pub fn exec_resume(cwd: &str, session_id: &str) -> Result<()> {
 /// claude 바이너리가 PATH에 있는지 확인
 pub fn which_claude() -> Option<std::path::PathBuf> {
     // which 크레이트 없이 직접 탐색
-    let path_var = std::env::var("PATH").unwrap_or_default();
+    let path_var = match std::env::var("PATH") {
+        Ok(p) if !p.is_empty() => p,
+        _ => {
+            log::warn!(
+                "PATH environment variable is empty or not set; cannot locate claude binary"
+            );
+            return None;
+        }
+    };
     let extensions = if cfg!(windows) {
         vec!["cmd", "exe", "bat", ""]
     } else {
         vec![""]
     };
 
+    let mut count = 0;
     for dir in std::env::split_paths(&path_var) {
+        count += 1;
         for ext in &extensions {
             let candidate = if ext.is_empty() {
                 dir.join("claude")
@@ -470,6 +481,10 @@ pub fn which_claude() -> Option<std::path::PathBuf> {
             }
         }
     }
+    log::warn!(
+        "claude binary not found in PATH ({} directories searched)",
+        count
+    );
     None
 }
 
