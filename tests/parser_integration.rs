@@ -58,6 +58,7 @@ fn test_fixtures_immutable_after_parse() {
         "over_scan_limit.jsonl",
         "null_content_fallback.jsonl",
         "surrogate.jsonl",
+        "cwd_meta_only.jsonl",
     ];
 
     for name in &fixtures {
@@ -267,4 +268,14 @@ fn test_null_content_fallback() {
     );
     // 메시지 수: user 2 + assistant 1 = 3
     assert_eq!(result.msg_count, 3, "메시지 수 불일치");
+}
+
+/// cwd가 첫 줄(메타)에만 있고 user 줄에는 없을 때 → cwd 올바르게 추출 (H-2)
+#[test]
+fn test_cwd_from_meta_line_only() {
+    let meta = make_meta("cwd_meta_only.jsonl");
+    let result = parse_session(&meta).expect("cwd_meta_only 파싱 실패");
+    assert_eq!(result.cwd, "/test/project");
+    assert_eq!(result.title, "hello");
+    assert_eq!(result.msg_count, 1);
 }

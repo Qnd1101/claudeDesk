@@ -110,6 +110,7 @@ dependencies = [
  "crossterm",
  "directories",
  "hex",
+ "log",
  "notify",
  "ratatui",
  "serde",
