@@ -33,6 +33,10 @@ fn main() -> Result<()> {
     // --sort <key_dir> (예: "title_asc")
     let sort = parse_arg_value(&args, "--sort");
 
+    // --facet <name> (recent/active/cleanup/project)
+    let initial_facet = parse_arg_value(&args, "--facet")
+        .and_then(|v| claudedesk::facet::Facet::parse(&v));
+
     // --config <path>
     let config_path = parse_arg_value(&args, "--config").map(PathBuf::from);
 
@@ -46,7 +50,12 @@ fn main() -> Result<()> {
 
     let config = Config::load(&cli)?;
     let service = SessionService::new(config.clone());
-    let state = AppState::build(&service)?;
+    let mut state = AppState::build(&service)?;
+
+    // --facet 인자 적용
+    if let Some(f) = initial_facet {
+        state.facet = f;
+    }
 
     // --list: TUI 없이 세션 목록을 stdout에 출력하고 종료 (스크립팅·진단용)
     if list_mode {
@@ -76,6 +85,7 @@ Claude Code 세션 관리자 TUI
 옵션:
   --root <path>      세션 루트 경로 지정 (기본: ~/.claude/projects)
   --sort <key_dir>   정렬 기준 (예: title_asc, modified_desc, created_asc, messages_desc)
+  --facet <name>     초기 탭 (recent/active/cleanup/project)
   --no-color         색상 비활성화 (Theme::Mono 강제)
   --config <path>    설정 파일 경로 지정 (기본: ~/.claude/claudedesk/config.toml)
   --list             세션 목록을 탭 구분 텍스트로 stdout 출력 후 종료 (스크립팅·진단용)

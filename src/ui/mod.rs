@@ -142,11 +142,26 @@ pub struct App {
     settings_path_editing: bool,
     /// 경로 편집 버퍼
     settings_path_input: String,
+
+    // ── FR-12/T5: FS 변경 자동 감지 (notify watcher) ──────────────────────
+    /// FS watcher 소유자 — drop 방지용. 실제로 poll은 watch_rx로.
+    _watcher: Option<notify::RecommendedWatcher>,
+    /// watcher 이벤트 수신 채널
+    watch_rx: Option<std::sync::mpsc::Receiver<()>>,
+    /// 마지막 이벤트 수신 시각 (300ms 디바운스)
+    watch_debounce: Option<std::time::Instant>,
 }
 
 impl App {
     pub fn new(state: AppState, config: Config) -> Self {
         let settings_draft = config.clone();
+
+        // watcher 시작 (실패해도 TUI는 계속 동작)
+        let (_watcher, watch_rx) = match crate::service::start_watcher(&state.projects_root) {
+            Ok((w, rx)) => (Some(w), Some(rx)),
+            Err(_) => (None, None),
+        };
+
         App {
             state,
             config,
@@ -184,6 +199,10 @@ impl App {
             settings_cursor: 0,
             settings_path_editing: false,
             settings_path_input: String::new(),
+
+            _watcher,
+            watch_rx,
+            watch_debounce: None,
         }
     }
 
@@ -397,6 +416,22 @@ impl App {
                     {
                         return Ok(());
                     }
+                }
+            }
+
+            // FS 변경 감지 poll (notify watcher)
+            if let Some(ref rx) = self.watch_rx {
+                if rx.try_recv().is_ok() {
+                    // 채널 drain (누적 이벤트 정리)
+                    while rx.try_recv().is_ok() {}
+                    self.watch_debounce = Some(std::time::Instant::now());
+                }
+            }
+            // 300ms 디바운스 후 reload
+            if let Some(t) = self.watch_debounce {
+                if t.elapsed() >= std::time::Duration::from_millis(300) {
+                    self.watch_debounce = None;
+                    self.reload_sessions()?;
                 }
             }
         }
@@ -1465,5 +1500,38 @@ impl App {
         self.current_session()
             .map(|s| s.cwd.clone())
             .unwrap_or_default()
+    }
+
+    /// 현재 커서 위치의 세션 session_id 반환
+    fn current_session_id(&self) -> Option<String> {
+        let indices = crate::facet::facet_indices(&self.state);
+        indices.get(self.cursor)
+            .and_then(|&i| self.state.sessions.get(i))
+            .map(|s| s.session_id.clone())
+    }
+
+    /// FS 변경 감지 시 세션 목록 재로드. cursor_identity로 커서 위치 복원.
+    fn reload_sessions(&mut self) -> Result<()> {
+        // 현재 커서 세션 id 저장
+        self.state.cursor_identity = self.current_session_id();
+
+        let service = crate::service::SessionService::new(self.config.clone());
+        if let Ok(mut new_state) = crate::service::AppState::build(&service) {
+            // 기존 UI 상태 이어받기
+            new_state.facet = self.state.facet;
+            new_state.launch_cwd = self.state.launch_cwd.clone();
+            new_state.cursor_identity = self.state.cursor_identity.clone();
+            new_state.sort = self.state.sort;
+            new_state.search_query = self.state.search_query.clone();
+            new_state.grouped = self.state.grouped;
+            new_state.collapsed_projects = self.state.collapsed_projects.clone();
+            self.state = new_state;
+            // 커서 복원
+            if let Some(row) = self.state.restore_cursor() {
+                self.cursor = row;
+            }
+        }
+        // reload 실패 시 현재 상태 유지
+        Ok(())
     }
 }

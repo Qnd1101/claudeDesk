@@ -483,7 +483,7 @@ use std::sync::mpsc::{self, Receiver};
 /// Phase 2에서 UI와 통합될 예정 (현재는 뼈대만 제공).
 pub fn start_watcher(
     projects_root: &std::path::Path,
-) -> NotifyResult<(impl Watcher, Receiver<()>)> {
+) -> NotifyResult<(notify::RecommendedWatcher, Receiver<()>)> {
     let (tx, rx) = mpsc::channel();
     let mut watcher = recommended_watcher(move |res: NotifyResult<notify::Event>| {
         if res.is_ok() {
