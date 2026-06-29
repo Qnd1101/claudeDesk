@@ -34,8 +34,8 @@ fn main() -> Result<()> {
     let sort = parse_arg_value(&args, "--sort");
 
     // --facet <name> (recent/active/cleanup/project)
-    let initial_facet = parse_arg_value(&args, "--facet")
-        .and_then(|v| claudedesk::facet::Facet::parse(&v));
+    let initial_facet =
+        parse_arg_value(&args, "--facet").and_then(|v| claudedesk::facet::Facet::parse(&v));
 
     // --config <path>
     let config_path = parse_arg_value(&args, "--config").map(PathBuf::from);

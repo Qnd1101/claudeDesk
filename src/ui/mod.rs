@@ -1505,7 +1505,8 @@ impl App {
     /// 현재 커서 위치의 세션 session_id 반환
     fn current_session_id(&self) -> Option<String> {
         let indices = crate::facet::facet_indices(&self.state);
-        indices.get(self.cursor)
+        indices
+            .get(self.cursor)
             .and_then(|&i| self.state.sessions.get(i))
             .map(|s| s.session_id.clone())
     }
