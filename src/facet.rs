@@ -1,8 +1,8 @@
 //! FR-15 facet 필터 (Recent/Active/Cleanup/Project).
-use serde::{Deserialize, Serialize};
 use crate::domain::Session;
 use crate::health::Health;
 use crate::service::AppState;
+use serde::{Deserialize, Serialize};
 
 /// 좌측 필터 탭 열거형. serde는 lowercase(recent/active/cleanup/project) 직렬화.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -103,28 +103,12 @@ impl std::fmt::Display for Facet {
 /// * `launch_cwd` - claudedesk 실행 디렉토리 (Project 필터용)
 pub fn matches(facet: Facet, s: &Session, launch_cwd: &str) -> bool {
     match facet {
-        Facet::Recent => true,                               // 전체 (정렬은 호출측)
+        Facet::Recent => true, // 전체 (정렬은 호출측)
         Facet::Active => s.health == Health::Active,
         Facet::Cleanup => s.health.is_cleanup(),
         Facet::Project => cwd_is_under(&s.cwd, launch_cwd),
     }
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 /// 경로가 base의 하위인지 판정 (Windows 안전하게 경로 정규화 후 prefix 비교).
 ///
@@ -134,9 +118,7 @@ pub fn matches(facet: Facet, s: &Session, launch_cwd: &str) -> bool {
 /// - `cwd_is_under("D:\\MyProject2", "D:\\MyProject")` → false (경계 확인)
 fn cwd_is_under(cwd: &str, base: &str) -> bool {
     // Windows: 대소문자 무시 + 경로 분리자 정규화
-    let normalize = |p: &str| -> String {
-        p.to_lowercase().replace('/', "\\")
-    };
+    let normalize = |p: &str| -> String { p.to_lowercase().replace('/', "\\") };
 
     let norm_cwd = normalize(cwd);
     let norm_base = normalize(base);
@@ -165,6 +147,24 @@ pub fn counts(state: &AppState) -> [usize; 4] {
             .count();
     }
     result
+}
+
+/// 현재 facet에 맞는 세션 indices (검색 필터 포함)
+pub fn facet_indices(state: &AppState) -> Vec<usize> {
+    state
+        .sessions
+        .iter()
+        .enumerate()
+        .filter(|(_, s)| {
+            // facet 필터
+            matches(state.facet, s, &state.launch_cwd)
+            // 검색 필터 (기존 filtered_indices 로직과 동일)
+            && state.search_query.as_deref()
+                .map(|q| q.is_empty() || s.search_text.to_lowercase().contains(&q.to_lowercase()))
+                .unwrap_or(true)
+        })
+        .map(|(i, _)| i)
+        .collect()
 }
 
 #[cfg(test)]

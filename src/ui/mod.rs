@@ -1,3 +1,4 @@
+mod facet_view;
 mod help;
 mod layout;
 mod list;
@@ -369,13 +370,12 @@ impl App {
                             let preview_content = self.current_preview_content();
                             let preview_title = self.current_session_title();
                             let preview_path = self.current_session_cwd();
-                            render_list(
+                            facet_view::render(
                                 f,
+                                f.area(),
                                 &self.state,
                                 self.cursor,
                                 search_mode,
-                                &self.state.selected_ids.clone(),
-                                self.status_message.as_deref(),
                                 self.preview_open,
                                 preview_content,
                                 &preview_title,
@@ -565,23 +565,42 @@ impl App {
                 self.open_age_select();
             }
 
-            // ── FR-09: 그룹 모드 토글 (g) ────────────────────────────────
-            KeyCode::Char('g') => {
-                self.state.grouped = !self.state.grouped;
-                self.cursor = 0;
+            // ── FR-15: facet 탭 전환 (Tab / Shift+Tab, 1-4) ──────────────
+            KeyCode::Tab => {
+                let current_id = self.current_session().map(|s| s.session_id.clone());
+                self.state.facet = self.state.facet.next();
+                if let Some(id) = current_id {
+                    self.state.cursor_identity = Some(id);
+                    self.restore_cursor_in_facet();
+                } else {
+                    self.cursor = 0;
+                }
             }
 
-            // ── FR-09: 그룹 접기/펼치기 (Tab) ────────────────────────────
-            KeyCode::Tab => {
-                if self.state.grouped {
-                    let cwd_opt = self.current_group_cwd();
-                    if let Some(cwd) = cwd_opt {
-                        if self.state.collapsed_projects.contains(&cwd) {
-                            self.state.collapsed_projects.remove(&cwd);
-                        } else {
-                            self.state.collapsed_projects.insert(cwd);
+            KeyCode::BackTab => {
+                let current_id = self.current_session().map(|s| s.session_id.clone());
+                self.state.facet = self.state.facet.prev();
+                if let Some(id) = current_id {
+                    self.state.cursor_identity = Some(id);
+                    self.restore_cursor_in_facet();
+                } else {
+                    self.cursor = 0;
+                }
+            }
+
+            KeyCode::Char('1') | KeyCode::Char('2') | KeyCode::Char('3') | KeyCode::Char('4') => {
+                if let KeyCode::Char(c) = code {
+                    if let Some(d) = c.to_digit(10) {
+                        if let Some(new_facet) = crate::facet::Facet::from_digit(d) {
+                            let current_id = self.current_session().map(|s| s.session_id.clone());
+                            self.state.facet = new_facet;
+                            if let Some(id) = current_id {
+                                self.state.cursor_identity = Some(id);
+                                self.restore_cursor_in_facet();
+                            } else {
+                                self.cursor = 0;
+                            }
                         }
-                        self.clamp_cursor();
                     }
                 }
             }
@@ -1322,18 +1341,6 @@ impl App {
         }
     }
 
-    /// 현재 커서가 속한 그룹의 cwd 반환
-    fn current_group_cwd(&self) -> Option<String> {
-        let rows = self.state.display_rows();
-        match rows.get(self.cursor)? {
-            DisplayRow::Header { cwd, .. } => Some(cwd.clone()),
-            DisplayRow::Session(real_idx) => {
-                let session = self.state.sessions.get(*real_idx)?;
-                Some(session.cwd.clone())
-            }
-        }
-    }
-
     /// 커서를 display_rows 범위 내로 클램프
     fn clamp_cursor(&mut self) {
         let len = self.state.display_rows().len();
@@ -1341,6 +1348,21 @@ impl App {
             self.cursor = 0;
         } else if self.cursor >= len {
             self.cursor = len - 1;
+        }
+    }
+
+    /// FR-15: facet 필터된 indices에서 cursor_identity 기준으로 cursor 복원
+    fn restore_cursor_in_facet(&mut self) {
+        if let Some(id) = &self.state.cursor_identity {
+            let facet_indices = crate::facet::facet_indices(&self.state);
+            for (i, &real_idx) in facet_indices.iter().enumerate() {
+                if self.state.sessions[real_idx].session_id == *id {
+                    self.cursor = i;
+                    return;
+                }
+            }
+            // fallback
+            self.cursor = 0;
         }
     }
 
