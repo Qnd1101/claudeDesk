@@ -1015,7 +1015,8 @@ theme = "dark"
 
         assert_eq!(config.stale_days, 90, "기본 stale_days는 90");
         assert_eq!(
-            config.default_facet, crate::facet::Facet::Recent,
+            config.default_facet,
+            crate::facet::Facet::Recent,
             "기본 default_facet은 Recent"
         );
     }
@@ -1041,7 +1042,8 @@ default_facet = "cleanup"
 
         assert_eq!(config.stale_days, 60, "TOML stale_days=60 파싱");
         assert_eq!(
-            config.default_facet, crate::facet::Facet::Cleanup,
+            config.default_facet,
+            crate::facet::Facet::Cleanup,
             "TOML default_facet=cleanup 파싱"
         );
     }
@@ -1073,7 +1075,8 @@ default_facet = "cleanup"
 
         assert_eq!(loaded.stale_days, 120, "stale_days 라운드트립 실패");
         assert_eq!(
-            loaded.default_facet, crate::facet::Facet::Active,
+            loaded.default_facet,
+            crate::facet::Facet::Active,
             "default_facet 라운드트립 실패"
         );
     }

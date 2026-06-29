@@ -204,9 +204,7 @@ impl AppState {
             dir: service.config.default_sort.dir,
         };
         let (sessions, stats) = service.load_sessions(sort, &aliases)?;
-        let launch_cwd = std::env::current_dir()?
-            .to_string_lossy()
-            .to_string();
+        let launch_cwd = std::env::current_dir()?.to_string_lossy().to_string();
         Ok(AppState {
             sessions,
             stats,
@@ -1171,10 +1169,7 @@ mod tests {
     /// cursor_identity가 None이면 restore_cursor는 None을 반환한다.
     #[test]
     fn test_restore_cursor_none_identity() {
-        let state = plain_state(vec![
-            make_session("A", 100, 1),
-            make_session("B", 200, 2),
-        ]);
+        let state = plain_state(vec![make_session("A", 100, 1), make_session("B", 200, 2)]);
         assert!(state.cursor_identity.is_none());
         // identity 없으면 복원 대상 없음 — UI가 자체 커서 위치 유지
         assert_eq!(state.restore_cursor(), None);
@@ -1195,12 +1190,13 @@ mod tests {
     /// cursor_identity가 목록에 없으면 fallback: 첫 번째 행.
     #[test]
     fn test_restore_cursor_not_found_fallback() {
-        let mut state = plain_state(vec![
-            make_session("A", 100, 1),
-            make_session("B", 200, 2),
-        ]);
+        let mut state = plain_state(vec![make_session("A", 100, 1), make_session("B", 200, 2)]);
         state.cursor_identity = Some("X".to_string());
-        assert_eq!(state.restore_cursor(), Some(0), "찾지 못하면 첫 행으로 fallback");
+        assert_eq!(
+            state.restore_cursor(),
+            Some(0),
+            "찾지 못하면 첫 행으로 fallback"
+        );
     }
 
     /// 빈 목록에서는 cursor_identity 설정 여부와 무관하게 None.

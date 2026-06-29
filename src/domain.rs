@@ -1,6 +1,6 @@
+use crate::health::Health;
 use std::path::PathBuf;
 use std::time::SystemTime;
-use crate::health::Health;
 
 /// 세션 도메인 모델
 #[derive(Debug, Clone)]
