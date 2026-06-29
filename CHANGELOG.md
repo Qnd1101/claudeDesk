@@ -5,6 +5,20 @@
 
 ## [Unreleased]
 
+## [0.12.1] - 2026-06-29
+
+### Fixed (코드리뷰 부채 해소 — 이슈 #5)
+- **H-1 파서 정확도:** `scan_count`가 유효 JSON 줄만 카운트하도록 수정. 파싱 실패 줄이 K줄 상한에 포함되던 문제 제거 (`src/parser.rs`).
+- **H-2 cwd 역치환 회귀 테스트:** cwd가 메타 줄에만 있고 user/assistant 줄엔 없을 때 cwd 추출이 정상 동작하는 픽스처(`tests/fixtures/cwd_meta_only.jsonl`) + 회귀 테스트 추가.
+- **H-3 exec_resume verbose warn:** `cwd`가 비어있을 때 현재 디렉토리에서 실행한다는 warn 로그 추가 (`src/service.rs`).
+- **M-2 말줄임표 폭 동적 계산:** `safe_truncate` / `middle_truncate`에서 `…` (U+2026) 폭을 하드코딩 1 대신 `UnicodeWidthStr::width()` 동적 계산으로 교체. East Asian Ambiguous 터미널 대응 (`src/ui/list.rs`).
+- **N-3 PATH vs claude 미설치 구분:** `which_claude()`에서 PATH 환경변수 부재와 claude 바이너리 미존재를 구분한 warn 메시지 출력 (`src/service.rs`).
+- **N-4 "어제" 달력 날짜 비교:** `relative_time()`의 "어제" 판정을 48h 휴리스틱에서 로컬 달력 날짜 비교(`NaiveDate`)로 교체. 자정 전후 불일치 제거 (`src/ui/time.rs`).
+- **M-5 확인 완료:** NO_COLOR 지원은 v0.10.0에서 이미 구현됨 (`config.color_enabled()`).
+
+### Tests
+- cwd_meta_only 회귀 테스트 신규 추가. 총 179 테스트 통과, clippy `-D warnings`·fmt 그린.
+
 ## [0.12.0] - 2026-06-29
 
 ### Added (Facet 2-pane UI 재설계)
