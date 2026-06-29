@@ -484,8 +484,12 @@ pub fn safe_truncate(s: &str, max_width: usize) -> String {
     if max_width == 0 {
         return String::new();
     }
-    // 말줄임표 폭(1)을 뺀 예산만큼 채운다
-    let budget = max_width - 1;
+    // 말줄임표 실제 폭 계산 (East Asian Ambiguous 대응)
+    const ELLIPSIS: char = '…';
+    let mut ellipsis_buf = [0u8; 4];
+    let ellipsis_width = UnicodeWidthStr::width(ELLIPSIS.encode_utf8(&mut ellipsis_buf));
+
+    let budget = max_width.saturating_sub(ellipsis_width);
     let mut width = 0usize;
     let mut result = String::new();
     for c in s.chars() {
@@ -496,7 +500,7 @@ pub fn safe_truncate(s: &str, max_width: usize) -> String {
         width += cw;
         result.push(c);
     }
-    result.push('…');
+    result.push(ELLIPSIS);
     result
 }
 
@@ -509,8 +513,12 @@ pub fn middle_truncate(s: &str, max_width: usize) -> String {
     if max_width <= 1 {
         return "…".to_string();
     }
-    // 말줄임표(1)를 뺀 예산을 앞뒤로 분배(뒤쪽=leaf을 더 길게).
-    let budget = max_width - 1;
+    // 말줄임표 실제 폭 계산 (East Asian Ambiguous 대응)
+    const ELLIPSIS: char = '…';
+    let mut ellipsis_buf = [0u8; 4];
+    let ellipsis_width = UnicodeWidthStr::width(ELLIPSIS.encode_utf8(&mut ellipsis_buf));
+
+    let budget = max_width.saturating_sub(ellipsis_width);
     let tail_budget = budget.div_ceil(2);
     let head_budget = budget - tail_budget;
 
@@ -541,7 +549,12 @@ pub fn middle_truncate(s: &str, max_width: usize) -> String {
         rev.chars().rev().collect()
     };
 
-    format!("{}…{}", take_prefix(head_budget), take_suffix(tail_budget))
+    format!(
+        "{}{}{}",
+        take_prefix(head_budget),
+        ELLIPSIS,
+        take_suffix(tail_budget)
+    )
 }
 
 #[cfg(test)]

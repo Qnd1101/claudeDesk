@@ -67,10 +67,11 @@ pub fn parse_session(file_meta: &FileMeta) -> Result<ParseResult> {
             continue;
         }
 
-        scan_count += 1;
-
         let raw: RawLine = match serde_json::from_str(trimmed) {
-            Ok(v) => v,
+            Ok(v) => {
+                scan_count += 1; // 유효 JSON 줄만 카운트
+                v
+            }
             Err(_) => {
                 skipped_lines += 1;
                 continue;
@@ -116,7 +117,7 @@ pub fn parse_session(file_meta: &FileMeta) -> Result<ParseResult> {
             }
         }
 
-        // 상한 초과 시 제목 탐색 종료 (나머지 줄은 계속 카운트)
+        // 상한 초과 시 제목 탐색 종료 (K줄 = 유효 JSON 줄, 공백·파싱실패 제외)
         // 단, 이미 user를 찾았거나 scan_count > MAX_SCAN_LINES이면 탐색 중단하되 카운트 계속
     }
 

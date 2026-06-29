@@ -1,34 +1,49 @@
-use chrono::{DateTime, Local};
-use std::time::{Duration, SystemTime};
+use chrono::{DateTime, Local, NaiveDate};
+use std::time::SystemTime;
+
+#[cfg(test)]
+use std::time::Duration;
 
 use crate::config::TimeFormat;
 
 /// SystemTime → 상대시간 문자열 (한국어, TimeFormat::Relative용)
 pub fn relative_time(t: &SystemTime) -> String {
-    let now = SystemTime::now();
-    let diff = match now.duration_since(*t) {
-        Ok(d) => d,
-        Err(_) => Duration::from_secs(0), // 미래 시간 방어
-    };
+    let now_local = Local::now();
+    let t_local: DateTime<Local> = (*t).into();
 
-    let secs = diff.as_secs();
+    let now_date: NaiveDate = now_local.date_naive();
+    let t_date: NaiveDate = t_local.date_naive();
 
-    if secs < 60 {
-        "방금 전".to_string()
-    } else if secs < 3600 {
-        format!("{}분 전", secs / 60)
-    } else if secs < 86400 {
-        format!("{}시간 전", secs / 3600)
-    } else if secs < 86400 * 2 {
-        "어제".to_string()
-    } else if secs < 86400 * 7 {
-        format!("{}일 전", secs / 86400)
-    } else if secs < 86400 * 30 {
-        format!("{}주 전", secs / (86400 * 7))
-    } else if secs < 86400 * 365 {
-        format!("{}달 전", secs / (86400 * 30))
+    // 오늘이면 시간 단위 상대
+    if t_date == now_date {
+        let secs = now_local
+            .signed_duration_since(t_local)
+            .num_seconds()
+            .max(0) as u64;
+        return if secs < 60 {
+            "방금 전".to_string()
+        } else if secs < 3600 {
+            format!("{}분 전", secs / 60)
+        } else {
+            format!("{}시간 전", secs / 3600)
+        };
+    }
+
+    // 어제
+    if t_date == now_date - chrono::Duration::days(1) {
+        return "어제".to_string();
+    }
+
+    // 이전 날짜
+    let days = (now_date - t_date).num_days().max(0) as u64;
+    if days < 7 {
+        format!("{}일 전", days)
+    } else if days < 30 {
+        format!("{}주 전", days / 7)
+    } else if days < 365 {
+        format!("{}달 전", days / 30)
     } else {
-        format!("{}년 전", secs / (86400 * 365))
+        format!("{}년 전", days / 365)
     }
 }
 
@@ -71,7 +86,16 @@ mod tests {
 
     #[test]
     fn test_relative_yesterday() {
-        let t = SystemTime::now() - Duration::from_secs(90000);
+        // 어제 정오 (달력 날짜 기준 명확히 어제)
+        let yesterday_noon = Local::now()
+            .date_naive()
+            .pred_opt()
+            .unwrap()
+            .and_hms_opt(12, 0, 0)
+            .unwrap()
+            .and_local_timezone(Local)
+            .unwrap();
+        let t = SystemTime::from(yesterday_noon);
         assert_eq!(relative_time(&t), "어제");
     }
 
