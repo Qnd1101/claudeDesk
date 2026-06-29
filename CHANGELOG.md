@@ -5,6 +5,16 @@
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-06-29
+
+### Added (검색 UX 개선 — 이슈 #41)
+- **facet 검색바:** `/` 키로 검색 모드 진입 시 facet 탭 아래 검색바 렌더. 입력 중인 쿼리와 매칭 건수(`N건`)를 실시간 표시. 기존 `_search_mode` 미사용 파라미터가 실제 렌더링에 연결됨 (`src/ui/facet_view.rs`).
+- **매칭 강조(UNDERLINED):** 검색 쿼리와 일치하는 제목 부분에 밑줄 스타일 적용. 대소문자 무시·원본 대소문자 보존. `NO_COLOR`/Mono 테마에서도 동작 (색 무관, §5.7).
+- **`highlight_query()` 헬퍼:** 쿼리 위치를 찾아 before/match/after 3-span `Line` 반환. 매치 없으면 plain text 반환. 단위 테스트 6종 추가.
+
+### Tests
+- `highlight_query` 단위 테스트 6종 신규 추가. 총 185 테스트 통과, clippy `-D warnings`·fmt 그린.
+
 ## [0.12.1] - 2026-06-29
 
 ### Fixed (코드리뷰 부채 해소 — 이슈 #5)
