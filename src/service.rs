@@ -169,6 +169,10 @@ pub struct AppState {
     pub collapsed_projects: std::collections::HashSet<String>,
     /// 별칭 사이드카 (FR-06). 편집 시 메모리 갱신 + 즉시 save.
     pub aliases: crate::alias::AliasStore,
+    /// 현재 좌측 facet (FR-15, 기본 config.default_facet)
+    pub facet: crate::facet::Facet,
+    /// 실행 디렉토리 (Project facet/우측 기본용, FR-15)
+    pub launch_cwd: String,
 }
 
 impl AppState {
@@ -180,6 +184,9 @@ impl AppState {
             dir: service.config.default_sort.dir,
         };
         let (sessions, stats) = service.load_sessions(sort, &aliases)?;
+        let launch_cwd = std::env::current_dir()?
+            .to_string_lossy()
+            .to_string();
         Ok(AppState {
             sessions,
             stats,
@@ -190,6 +197,8 @@ impl AppState {
             grouped: false,
             collapsed_projects: std::collections::HashSet::new(),
             aliases,
+            facet: service.config.default_facet,
+            launch_cwd,
         })
     }
 
@@ -462,6 +471,7 @@ mod tests {
             skipped_lines: 0,
             alias: None,
             search_text,
+            health: crate::health::Health::Active,
         }
     }
 
@@ -646,6 +656,7 @@ mod tests {
             skipped_lines: 0,
             alias: None,
             search_text,
+            health: crate::health::Health::Active,
         }
     }
 

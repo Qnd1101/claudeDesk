@@ -7,6 +7,8 @@ use serde::{de, Deserialize, Deserializer, Serialize, Serializer};
 use std::fmt;
 use std::path::{Path, PathBuf};
 
+use crate::facet::Facet;
+
 // ── 정렬 열거형 ───────────────────────────────────────────────────────────────
 
 /// 정렬 키 (FR-07)
@@ -323,6 +325,8 @@ struct ConfigToml {
     active_window_secs: u64,
     include_subagents: bool,
     theme: Theme,
+    stale_days: u32,
+    default_facet: Facet,
 }
 
 impl Default for ConfigToml {
@@ -336,6 +340,8 @@ impl Default for ConfigToml {
             active_window_secs: 90,
             include_subagents: false,
             theme: Theme::default(),
+            stale_days: 90,
+            default_facet: Facet::Recent,
         }
     }
 }
@@ -378,6 +384,10 @@ pub struct Config {
     pub include_subagents: bool,
     /// 색상 테마
     pub theme: Theme,
+    /// 세션 stale 판정 기간(일, 기본 90)
+    pub stale_days: u32,
+    /// 기본 facet (기본 Recent)
+    pub default_facet: Facet,
     /// 상세 로그
     pub verbose: bool,
     /// 설정 파일 경로 (save 대상)
@@ -426,6 +436,8 @@ impl Config {
             active_window_secs: file_cfg.active_window_secs,
             include_subagents: file_cfg.include_subagents,
             theme,
+            stale_days: file_cfg.stale_days,
+            default_facet: file_cfg.default_facet,
             verbose: cli.verbose,
             config_file_path: config_path,
         })
@@ -443,6 +455,8 @@ impl Config {
             active_window_secs: self.active_window_secs,
             include_subagents: self.include_subagents,
             theme: self.theme,
+            stale_days: self.stale_days,
+            default_facet: self.default_facet,
         };
 
         let toml_str = toml::to_string_pretty(&cfg).context("config 직렬화 실패")?;
@@ -983,5 +997,119 @@ theme = "dark"
         let config = Config::load(&cli).unwrap();
 
         assert_eq!(config.config_path(), path.as_path());
+    }
+
+    // ── stale_days & default_facet 필드 추가 테스트 (T5) ────────────────────────
+
+    #[test]
+    fn test_load_defaults_stale_days_and_facet() {
+        let tmp = TempDir::new().unwrap();
+        let path = tmp.path().join("config.toml");
+        assert!(!path.exists());
+
+        let cli = CliOverrides {
+            config: Some(path),
+            ..CliOverrides::default()
+        };
+        let config = Config::load(&cli).unwrap();
+
+        assert_eq!(config.stale_days, 90, "기본 stale_days는 90");
+        assert_eq!(
+            config.default_facet, crate::facet::Facet::Recent,
+            "기본 default_facet은 Recent"
+        );
+    }
+
+    #[test]
+    fn test_toml_parses_stale_days_and_facet() {
+        let tmp = TempDir::new().unwrap();
+        let path = tmp.path().join("config.toml");
+        std::fs::write(
+            &path,
+            r#"
+stale_days = 60
+default_facet = "cleanup"
+"#,
+        )
+        .unwrap();
+
+        let cli = CliOverrides {
+            config: Some(path),
+            ..CliOverrides::default()
+        };
+        let config = Config::load(&cli).unwrap();
+
+        assert_eq!(config.stale_days, 60, "TOML stale_days=60 파싱");
+        assert_eq!(
+            config.default_facet, crate::facet::Facet::Cleanup,
+            "TOML default_facet=cleanup 파싱"
+        );
+    }
+
+    #[test]
+    fn test_save_load_roundtrip_stale_days_and_facet() {
+        let tmp = TempDir::new().unwrap();
+        let path = tmp.path().join("config.toml");
+
+        let cli = CliOverrides {
+            config: Some(path.clone()),
+            ..CliOverrides::default()
+        };
+        let mut config = Config::load(&cli).unwrap();
+
+        // 값 변경
+        config.stale_days = 120;
+        config.default_facet = crate::facet::Facet::Active;
+
+        // 저장
+        config.save().unwrap();
+
+        // 다시 로드
+        let cli2 = CliOverrides {
+            config: Some(path),
+            ..CliOverrides::default()
+        };
+        let loaded = Config::load(&cli2).unwrap();
+
+        assert_eq!(loaded.stale_days, 120, "stale_days 라운드트립 실패");
+        assert_eq!(
+            loaded.default_facet, crate::facet::Facet::Active,
+            "default_facet 라운드트립 실패"
+        );
+    }
+
+    #[test]
+    fn test_all_facets_roundtrip() {
+        let tmp = TempDir::new().unwrap();
+        let path = tmp.path().join("config.toml");
+
+        let facets = [
+            crate::facet::Facet::Recent,
+            crate::facet::Facet::Active,
+            crate::facet::Facet::Cleanup,
+            crate::facet::Facet::Project,
+        ];
+
+        for facet in &facets {
+            let cli = CliOverrides {
+                config: Some(path.clone()),
+                ..CliOverrides::default()
+            };
+            let mut config = Config::load(&cli).unwrap();
+            config.default_facet = *facet;
+            config.save().unwrap();
+
+            let cli2 = CliOverrides {
+                config: Some(path.clone()),
+                ..CliOverrides::default()
+            };
+            let loaded = Config::load(&cli2).unwrap();
+
+            assert_eq!(
+                loaded.default_facet, *facet,
+                "facet {:?} 라운드트립 실패",
+                facet
+            );
+        }
     }
 }

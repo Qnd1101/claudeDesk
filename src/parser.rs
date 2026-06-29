@@ -243,6 +243,7 @@ pub fn build_session(
         skipped_lines: result.skipped_lines,
         alias: alias.map(|s| s.to_string()),
         search_text,
+        health: crate::health::Health::Active,
     }
 }
 
