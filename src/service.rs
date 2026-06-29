@@ -1,10 +1,22 @@
 use anyhow::{Context, Result};
 use std::process::Command;
+use std::time::{Duration, SystemTime};
 
 use crate::config::Config;
 use crate::data::discover_sessions;
 use crate::domain::Session;
 use crate::parser::{build_search_text, build_session, parse_session};
+
+// ── health 분류 (FR-10 정리 기능, T3) ─────────────────────────────────────────
+
+/// 세션 Vec의 health 필드를 실제로 분류 (in-place).
+/// stale_cutoff 이전에 수정된 세션은 Stale로, 기타는 classify()로 판정.
+fn classify_all_health(sessions: &mut [Session], stale_cutoff: SystemTime) {
+    for s in sessions.iter_mut() {
+        let cwd_exists = std::path::Path::new(&s.cwd).is_dir();
+        s.health = crate::health::classify(s.msg_count, cwd_exists, s.modified, stale_cutoff);
+    }
+}
 
 // ── 정렬 (FR-07) ─────────────────────────────────────────────────────────────
 // SortKey, SortDir は config.rs で定義 (serde + FR-10 設定レイヤー)。
@@ -92,7 +104,7 @@ impl SessionService {
         Self { config }
     }
 
-    /// 세션 목록 빌드: 디스커버리 → 파싱 → 별칭 주입 → 정렬 적용
+    /// 세션 목록 빌드: 디스커버리 → 파싱 → 별칭 주입 → health 분류 → 정렬 적용
     pub fn load_sessions(
         &self,
         sort: SortState,
@@ -124,6 +136,12 @@ impl SessionService {
                 }
             }
         }
+
+        // T3: health 분류 (FR-10 정리 기능)
+        let stale_cutoff = SystemTime::now()
+            .checked_sub(Duration::from_secs(self.config.stale_days as u64 * 86400))
+            .unwrap_or(SystemTime::UNIX_EPOCH);
+        classify_all_health(&mut sessions, stale_cutoff);
 
         apply_sort(&mut sessions, sort);
 
@@ -169,6 +187,12 @@ pub struct AppState {
     pub collapsed_projects: std::collections::HashSet<String>,
     /// 별칭 사이드카 (FR-06). 편집 시 메모리 갱신 + 즉시 save.
     pub aliases: crate::alias::AliasStore,
+    /// 현재 좌측 facet (FR-15, 기본 config.default_facet)
+    pub facet: crate::facet::Facet,
+    /// 실행 디렉토리 (Project facet/우측 기본용, FR-15)
+    pub launch_cwd: String,
+    /// 현재 선택 세션의 session_id (facet 전환/reload 후 커서 복원용, T4)
+    pub cursor_identity: Option<String>,
 }
 
 impl AppState {
@@ -180,6 +204,7 @@ impl AppState {
             dir: service.config.default_sort.dir,
         };
         let (sessions, stats) = service.load_sessions(sort, &aliases)?;
+        let launch_cwd = std::env::current_dir()?.to_string_lossy().to_string();
         Ok(AppState {
             sessions,
             stats,
@@ -190,6 +215,9 @@ impl AppState {
             grouped: false,
             collapsed_projects: std::collections::HashSet::new(),
             aliases,
+            facet: service.config.default_facet,
+            launch_cwd,
+            cursor_identity: None,
         })
     }
 
@@ -329,6 +357,26 @@ impl AppState {
         ids.len()
     }
 
+    /// cursor_identity 기준으로 display_rows에서 행 번호 반환.
+    /// 없으면 0 (빈 목록이면 None). T4 커서 복원용.
+    pub fn restore_cursor(&self) -> Option<usize> {
+        let id = self.cursor_identity.as_deref()?;
+        let rows = self.display_rows();
+        for (i, row) in rows.iter().enumerate() {
+            if let DisplayRow::Session(idx) = row {
+                if self.sessions[*idx].session_id == id {
+                    return Some(i);
+                }
+            }
+        }
+        // fallback: 첫 번째 행
+        if rows.is_empty() {
+            None
+        } else {
+            Some(0)
+        }
+    }
+
     /// 별칭 설정 + 사이드카 원자적 저장 + 해당 세션 메모리 갱신 (FR-06).
     /// first_user_raw는 메모리에 없으므로 None으로 재조립 (의도적 트레이드오프 — plan §3.5).
     pub fn set_alias(&mut self, session_id: &str, new_alias: &str) -> anyhow::Result<()> {
@@ -425,6 +473,155 @@ pub fn which_claude() -> Option<std::path::PathBuf> {
     None
 }
 
+// ── notify watcher (FR-12, T5) ────────────────────────────────────────────────
+
+use notify::{recommended_watcher, RecursiveMode, Result as NotifyResult, Watcher};
+use std::sync::mpsc::{self, Receiver};
+
+/// notify watcher 시작. mpsc Receiver를 반환 — UI 루프에서 poll.
+/// sender 이벤트: () (변경 감지만; 상세 경로는 reload 후 재계산)
+/// Phase 2에서 UI와 통합될 예정 (현재는 뼈대만 제공).
+pub fn start_watcher(
+    projects_root: &std::path::Path,
+) -> NotifyResult<(notify::RecommendedWatcher, Receiver<()>)> {
+    let (tx, rx) = mpsc::channel();
+    let mut watcher = recommended_watcher(move |res: NotifyResult<notify::Event>| {
+        if res.is_ok() {
+            let _ = tx.send(());
+        }
+    })?;
+    watcher.watch(projects_root, RecursiveMode::Recursive)?;
+    Ok((watcher, rx))
+}
+
+// ── --list 출력 ───────────────────────────────────────────────────────────────
+
+/// 세션 슬라이스를 탭 구분 텍스트로 변환 (`--list` 플래그용 순수 함수).
+///
+/// 출력 형식:
+/// - 1행: `#title\tsession_id\tcwd\tmodified_epoch\tmsg_count\tactive\tskipped_lines` (주석 헤더)
+/// - 이후: 1세션/1행, 각 컬럼은 탭 구분
+/// - `active`: 0 또는 1
+/// - `modified_epoch`: UNIX 에포크 초
+pub fn format_session_list(sessions: &[crate::domain::Session]) -> String {
+    use std::time::UNIX_EPOCH;
+
+    let mut lines = Vec::with_capacity(sessions.len() + 1);
+    lines.push(
+        "#title\tsession_id\tcwd\tmodified_epoch\tmsg_count\tactive\tskipped_lines".to_string(),
+    );
+
+    for s in sessions {
+        let title = s.display_title();
+        let epoch = s
+            .modified
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        let active = u8::from(s.is_active);
+        lines.push(format!(
+            "{}\t{}\t{}\t{}\t{}\t{}\t{}",
+            title, s.session_id, s.cwd, epoch, s.msg_count, active, s.skipped_lines
+        ));
+    }
+
+    lines.join("\n")
+}
+
+// ── spawn resume ───────────────────────────────────────────────────────────────
+
+/// OS와 Linux 터미널 힌트를 주입받아 spawn 명령 후보 목록을 반환 (순수 함수, 테스트 가능).
+///
+/// - Windows: `wt.exe` 우선, `cmd /c start` 폴백
+/// - macOS: `osascript` Terminal 스크립트
+/// - 기타(Linux): `linux_terminal -e "..."`
+/// - 빈 `cwd` → `"."` 폴백
+///
+/// 반환값: `(program, args)` 후보 Vec — 앞에서부터 순서대로 시도.
+pub fn build_spawn_candidates_for_os(
+    cwd: &str,
+    session_id: &str,
+    os: &str,
+    linux_terminal: &str,
+) -> Vec<(String, Vec<String>)> {
+    let effective_cwd = if cwd.is_empty() { "." } else { cwd };
+
+    match os {
+        "windows" => vec![
+            (
+                "wt.exe".to_string(),
+                vec![
+                    "-d".to_string(),
+                    effective_cwd.to_string(),
+                    "claude".to_string(),
+                    "--resume".to_string(),
+                    session_id.to_string(),
+                ],
+            ),
+            (
+                "cmd".to_string(),
+                vec![
+                    "/c".to_string(),
+                    "start".to_string(),
+                    String::new(),
+                    "/D".to_string(),
+                    effective_cwd.to_string(),
+                    "cmd".to_string(),
+                    "/k".to_string(),
+                    format!("claude --resume {}", session_id),
+                ],
+            ),
+        ],
+        "macos" => {
+            let escaped = effective_cwd.replace('\'', "'\\''");
+            let script = format!(
+                "tell app \"Terminal\" to do script \"cd '{}' && claude --resume {}\"",
+                escaped, session_id
+            );
+            vec![("osascript".to_string(), vec!["-e".to_string(), script])]
+        }
+        _ => {
+            // Linux: $TERMINAL(인자로 주입) -e "cd '...' && claude --resume <id>"
+            let escaped = effective_cwd.replace('\'', "'\\''");
+            let cmd = format!("cd '{}' && claude --resume {}", escaped, session_id);
+            vec![(linux_terminal.to_string(), vec!["-e".to_string(), cmd])]
+        }
+    }
+}
+
+/// 실행 환경 OS에 맞는 spawn 명령 후보 목록 반환.
+/// Linux에서는 `$TERMINAL` 환경변수 우선, 없으면 `x-terminal-emulator` 폴백.
+pub fn build_spawn_command_candidates(cwd: &str, session_id: &str) -> Vec<(String, Vec<String>)> {
+    let linux_terminal =
+        std::env::var("TERMINAL").unwrap_or_else(|_| "x-terminal-emulator".to_string());
+    build_spawn_candidates_for_os(cwd, session_id, std::env::consts::OS, &linux_terminal)
+}
+
+/// Spawn 모드 resume: 새 터미널 창에서 `claude --resume <id>` 를 띄우고 상태 메시지 반환.
+/// 모든 후보가 실패해도 패닉 없이 graceful 반환 (크래시 금지).
+pub fn exec_resume_spawn(cwd: &str, session_id: &str) -> String {
+    let candidates = build_spawn_command_candidates(cwd, session_id);
+    let effective_cwd = if cwd.is_empty() { "." } else { cwd };
+
+    for (program, args) in &candidates {
+        if Command::new(program)
+            .args(args)
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .is_ok()
+        {
+            return format!("새 터미널에서 claude --resume {} 시작됨", session_id);
+        }
+    }
+
+    format!(
+        "터미널 열기 실패 — 수동 실행: cd \"{}\" && claude --resume {}",
+        effective_cwd, session_id
+    )
+}
+
 // ── 정렬 유닛 테스트 ──────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -462,6 +659,7 @@ mod tests {
             skipped_lines: 0,
             alias: None,
             search_text,
+            health: crate::health::Health::Active,
         }
     }
 
@@ -570,6 +768,9 @@ mod tests {
             grouped: false,
             collapsed_projects: std::collections::HashSet::new(),
             aliases: crate::alias::AliasStore::default(),
+            facet: crate::facet::Facet::Recent,
+            launch_cwd: "/tmp".to_string(),
+            cursor_identity: None,
         };
         let idx = state.filtered_indices();
         assert_eq!(idx, vec![0, 1]);
@@ -591,6 +792,9 @@ mod tests {
             grouped: false,
             collapsed_projects: std::collections::HashSet::new(),
             aliases: crate::alias::AliasStore::default(),
+            facet: crate::facet::Facet::Recent,
+            launch_cwd: "/tmp".to_string(),
+            cursor_identity: None,
         };
         let idx = state.filtered_indices();
         assert_eq!(idx, vec![0, 2]);
@@ -611,6 +815,9 @@ mod tests {
             grouped: false,
             collapsed_projects: std::collections::HashSet::new(),
             aliases: crate::alias::AliasStore::default(),
+            facet: crate::facet::Facet::Recent,
+            launch_cwd: "/tmp".to_string(),
+            cursor_identity: None,
         };
         let idx = state.filtered_indices();
         assert_eq!(idx, vec![0]);
@@ -646,6 +853,7 @@ mod tests {
             skipped_lines: 0,
             alias: None,
             search_text,
+            health: crate::health::Health::Active,
         }
     }
 
@@ -683,6 +891,9 @@ mod tests {
             grouped: false,
             collapsed_projects: std::collections::HashSet::new(),
             aliases: crate::alias::AliasStore::default(),
+            facet: crate::facet::Facet::Recent,
+            launch_cwd: "/tmp".to_string(),
+            cursor_identity: None,
         };
         let rows = state.display_rows();
         assert_eq!(rows, vec![DisplayRow::Session(0), DisplayRow::Session(1)]);
@@ -703,6 +914,9 @@ mod tests {
             grouped: true,
             collapsed_projects: std::collections::HashSet::new(),
             aliases: crate::alias::AliasStore::default(),
+            facet: crate::facet::Facet::Recent,
+            launch_cwd: "/tmp".to_string(),
+            cursor_identity: None,
         };
         let rows = state.display_rows();
         // alpha (100 secs ago) is more recent -> alpha first
@@ -736,6 +950,9 @@ mod tests {
             grouped: true,
             collapsed_projects: collapsed,
             aliases: crate::alias::AliasStore::default(),
+            facet: crate::facet::Facet::Recent,
+            launch_cwd: "/tmp".to_string(),
+            cursor_identity: None,
         };
         let rows = state.display_rows();
         assert_eq!(rows.len(), 3);
@@ -779,6 +996,9 @@ mod tests {
             grouped: true,
             collapsed_projects: std::collections::HashSet::new(),
             aliases: crate::alias::AliasStore::default(),
+            facet: crate::facet::Facet::Recent,
+            launch_cwd: "/tmp".to_string(),
+            cursor_identity: None,
         };
         let rows = state.display_rows();
         match &rows[0] {
@@ -802,6 +1022,9 @@ mod tests {
             grouped: true,
             collapsed_projects: std::collections::HashSet::new(),
             aliases: crate::alias::AliasStore::default(),
+            facet: crate::facet::Facet::Recent,
+            launch_cwd: "/tmp".to_string(),
+            cursor_identity: None,
         };
         let rows = state.display_rows();
         assert_eq!(rows.len(), 2);
@@ -839,6 +1062,9 @@ mod tests {
             grouped: false,
             collapsed_projects: std::collections::HashSet::new(),
             aliases: crate::alias::AliasStore::default(),
+            facet: crate::facet::Facet::Recent,
+            launch_cwd: "/tmp".to_string(),
+            cursor_identity: None,
         };
         let idx = state.filtered_indices();
         assert_eq!(
@@ -870,6 +1096,9 @@ mod tests {
             grouped: true,
             collapsed_projects: std::collections::HashSet::new(),
             aliases: crate::alias::AliasStore::default(),
+            facet: crate::facet::Facet::Recent,
+            launch_cwd: "/tmp".to_string(),
+            cursor_identity: None,
         }
     }
 
@@ -999,6 +1228,9 @@ mod tests {
             grouped: false,
             collapsed_projects: std::collections::HashSet::new(),
             aliases: crate::alias::AliasStore::default(),
+            facet: crate::facet::Facet::Recent,
+            launch_cwd: "/tmp".to_string(),
+            cursor_identity: None,
         }
     }
 
@@ -1058,5 +1290,216 @@ mod tests {
         let cutoff = SystemTime::now() - Duration::from_secs(30 * DAY);
         let ids = state.older_than_ids(cutoff);
         assert_eq!(ids, vec!["docker-old"], "검색에 가려진 세션은 대상 제외");
+    }
+
+    // ── T4: cursor_identity 복원 테스트 ────────────────────────────────────────
+
+    /// cursor_identity가 None이면 restore_cursor는 None을 반환한다.
+    #[test]
+    fn test_restore_cursor_none_identity() {
+        let state = plain_state(vec![make_session("A", 100, 1), make_session("B", 200, 2)]);
+        assert!(state.cursor_identity.is_none());
+        // identity 없으면 복원 대상 없음 — UI가 자체 커서 위치 유지
+        assert_eq!(state.restore_cursor(), None);
+    }
+
+    /// cursor_identity가 설정되고 display_rows에서 찾으면 그 행 번호를 반환한다.
+    #[test]
+    fn test_restore_cursor_found() {
+        let mut state = plain_state(vec![
+            make_session("A", 100, 1),
+            make_session("B", 200, 2),
+            make_session("C", 300, 3),
+        ]);
+        state.cursor_identity = Some("B".to_string());
+        assert_eq!(state.restore_cursor(), Some(1), "B는 인덱스 1");
+    }
+
+    /// cursor_identity가 목록에 없으면 fallback: 첫 번째 행.
+    #[test]
+    fn test_restore_cursor_not_found_fallback() {
+        let mut state = plain_state(vec![make_session("A", 100, 1), make_session("B", 200, 2)]);
+        state.cursor_identity = Some("X".to_string());
+        assert_eq!(
+            state.restore_cursor(),
+            Some(0),
+            "찾지 못하면 첫 행으로 fallback"
+        );
+    }
+
+    /// 빈 목록에서는 cursor_identity 설정 여부와 무관하게 None.
+    #[test]
+    fn test_restore_cursor_empty_list() {
+        let mut state = plain_state(vec![]);
+        state.cursor_identity = Some("A".to_string());
+        assert_eq!(state.restore_cursor(), None, "빈 목록은 None");
+    }
+
+    /// 그룹 모드에서: cursor_identity가 visible 세션에 있으면 display_rows 행 번호로 반환.
+    #[test]
+    fn test_restore_cursor_grouped_mode() {
+        let mut state = AppState {
+            sessions: vec![
+                make_session_with_cwd("S1", "/proj/alpha", 100, 1),
+                make_session_with_cwd("S2", "/proj/beta", 200, 2),
+            ],
+            stats: ScanStats::default(),
+            projects_root: std::path::PathBuf::from("/tmp"),
+            sort: SortState::default(),
+            search_query: None,
+            selected_ids: std::collections::HashSet::new(),
+            grouped: true,
+            collapsed_projects: std::collections::HashSet::new(),
+            aliases: crate::alias::AliasStore::default(),
+            facet: crate::facet::Facet::Recent,
+            launch_cwd: "/tmp".to_string(),
+            cursor_identity: None,
+        };
+        state.cursor_identity = Some("S2".to_string());
+
+        // display_rows: Header(alpha), Session(0), Header(beta), Session(1)
+        // → "S2"는 Session(1)이므로 display_rows 인덱스 3
+        let row_idx = state.restore_cursor();
+        assert_eq!(row_idx, Some(3), "그룹 모드에서 S2는 display_rows 인덱스 3");
+    }
+
+    // ── format_session_list 유닛 테스트 ──────────────────────────────────────
+
+    /// 빈 목록 → 헤더 행만 반환
+    #[test]
+    fn test_format_session_list_empty() {
+        let out = format_session_list(&[]);
+        assert_eq!(
+            out,
+            "#title\tsession_id\tcwd\tmodified_epoch\tmsg_count\tactive\tskipped_lines"
+        );
+    }
+
+    /// 세션 1개: 탭이 6개(=7컬럼 구분), 컬럼 순서 확인
+    #[test]
+    fn test_format_session_list_columns_and_tabs() {
+        let s = make_session("My Title", 0, 42);
+        let out = format_session_list(&[s]);
+        let lines: Vec<&str> = out.split('\n').collect();
+        assert_eq!(lines.len(), 2, "헤더+데이터 2행 필요");
+        let data_cols: Vec<&str> = lines[1].split('\t').collect();
+        assert_eq!(data_cols.len(), 7, "데이터 행에 탭 구분 7컬럼 필요");
+        assert_eq!(data_cols[0], "My Title", "첫 컬럼=제목");
+        assert_eq!(data_cols[4], "42", "다섯 번째 컬럼=msg_count");
+    }
+
+    /// is_active=true → active 컬럼 "1", false → "0"
+    #[test]
+    fn test_format_session_list_active_marker() {
+        let mut active = make_session("A", 0, 1);
+        active.is_active = true;
+        let inactive = make_session("B", 0, 1);
+
+        let out = format_session_list(&[active, inactive]);
+        let lines: Vec<&str> = out.split('\n').collect();
+        let active_cols: Vec<&str> = lines[1].split('\t').collect();
+        let inactive_cols: Vec<&str> = lines[2].split('\t').collect();
+        assert_eq!(active_cols[5], "1", "활성 세션 active=1");
+        assert_eq!(inactive_cols[5], "0", "비활성 세션 active=0");
+    }
+
+    /// 별칭이 있으면 title 컬럼에 별칭 출력 (display_title 우선)
+    #[test]
+    fn test_format_session_list_uses_alias_as_title() {
+        let mut s = make_session("Original", 0, 1);
+        s.alias = Some("MyAlias".to_string());
+        let out = format_session_list(&[s]);
+        let data_line = out.split('\n').nth(1).unwrap();
+        assert!(
+            data_line.starts_with("MyAlias\t"),
+            "별칭이 제목 컬럼에 출력돼야 함"
+        );
+    }
+
+    // ── build_spawn_candidates_for_os 유닛 테스트 ────────────────────────────
+
+    /// Windows: 첫 번째 후보(wt.exe)에 --resume과 session_id가 있어야 함
+    #[test]
+    fn test_build_spawn_windows_first_candidate_has_resume() {
+        let candidates =
+            build_spawn_candidates_for_os("/some/cwd", "test-session-id", "windows", "");
+        assert!(!candidates.is_empty(), "Windows 후보가 비어있음");
+        let (prog, args) = &candidates[0];
+        assert_eq!(prog, "wt.exe");
+        assert!(
+            args.contains(&"--resume".to_string()),
+            "wt.exe args에 --resume 없음"
+        );
+        assert!(
+            args.contains(&"test-session-id".to_string()),
+            "wt.exe args에 session_id 없음"
+        );
+    }
+
+    /// Windows: 첫 번째 후보(wt.exe) args에 cwd가 포함돼야 함
+    #[test]
+    fn test_build_spawn_windows_contains_cwd() {
+        let candidates = build_spawn_candidates_for_os("D:\\Dev\\project", "sid", "windows", "");
+        let (_, args) = &candidates[0];
+        assert!(
+            args.contains(&"D:\\Dev\\project".to_string()),
+            "wt.exe args에 cwd 없음"
+        );
+    }
+
+    /// Windows: 빈 cwd → "." 폴백
+    #[test]
+    fn test_build_spawn_empty_cwd_uses_dot() {
+        let candidates = build_spawn_candidates_for_os("", "sid", "windows", "");
+        let (_, args) = &candidates[0];
+        assert!(args.contains(&".".to_string()), "빈 cwd → '.' 폴백 없음");
+    }
+
+    /// Windows: 두 번째 후보(cmd) 폴백도 --resume 포함
+    #[test]
+    fn test_build_spawn_windows_fallback_has_resume() {
+        let candidates = build_spawn_candidates_for_os("/cwd", "mysid", "windows", "");
+        assert!(candidates.len() >= 2, "Windows는 2개 이상 후보 필요");
+        let (prog, args) = &candidates[1];
+        assert_eq!(prog, "cmd");
+        // cmd /k 에 --resume이 포함된 문자열이 있어야 함
+        let joined = args.join(" ");
+        assert!(joined.contains("--resume"), "cmd 폴백 args에 --resume 없음");
+        assert!(joined.contains("mysid"), "cmd 폴백 args에 session_id 없음");
+    }
+
+    /// macOS: osascript 스크립트에 --resume과 session_id, cwd 포함
+    #[test]
+    fn test_build_spawn_macos_script_contains_resume() {
+        let candidates = build_spawn_candidates_for_os("/home/user/proj", "mac-sid", "macos", "");
+        assert_eq!(candidates.len(), 1);
+        let (prog, args) = &candidates[0];
+        assert_eq!(prog, "osascript");
+        let script = args.join(" ");
+        assert!(
+            script.contains("--resume"),
+            "macOS 스크립트에 --resume 없음"
+        );
+        assert!(
+            script.contains("mac-sid"),
+            "macOS 스크립트에 session_id 없음"
+        );
+        assert!(
+            script.contains("/home/user/proj"),
+            "macOS 스크립트에 cwd 없음"
+        );
+    }
+
+    /// Linux: linux_terminal -e "..." args에 --resume과 session_id 포함
+    #[test]
+    fn test_build_spawn_linux_uses_terminal_and_contains_resume() {
+        let candidates =
+            build_spawn_candidates_for_os("/home/user", "lsid", "linux", "my-terminal");
+        assert_eq!(candidates.len(), 1);
+        let (prog, args) = &candidates[0];
+        assert_eq!(prog, "my-terminal", "Linux terminal 프로그램 불일치");
+        let cmd = args.join(" ");
+        assert!(cmd.contains("--resume"), "Linux args에 --resume 없음");
+        assert!(cmd.contains("lsid"), "Linux args에 session_id 없음");
     }
 }

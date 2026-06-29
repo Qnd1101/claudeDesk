@@ -1,3 +1,4 @@
+use crate::health::Health;
 use std::path::PathBuf;
 use std::time::SystemTime;
 
@@ -28,6 +29,8 @@ pub struct Session {
     pub alias: Option<String>,
     /// 검색 대상 텍스트: title + cwd + alias 결합 (FR-05·FR-06 incremental 필터용)
     pub search_text: String,
+    /// 정리 분류 (A1: Active = 정상/건강)
+    pub health: Health,
 }
 
 /// cwd 문자열에서 마지막 경로 세그먼트를 반환 (/ 또는 \\ 분리)

@@ -1,3 +1,4 @@
+mod facet_view;
 mod help;
 mod layout;
 mod list;
@@ -19,9 +20,11 @@ use std::collections::HashSet;
 use std::io::stdout;
 use std::time::Duration;
 
-use crate::config::{expand_tilde, Config};
+use crate::config::{expand_tilde, Config, ResumeMode};
 use crate::preview::{read_preview, PreviewContent, MAX_PREVIEW_BYTES, MAX_PREVIEW_LINES};
-use crate::service::{exec_resume, resume_session, AppState, DisplayRow, ResumeResult};
+use crate::service::{
+    exec_resume, exec_resume_spawn, resume_session, AppState, DisplayRow, ResumeResult,
+};
 
 /// 미리보기 캐시 키 — 타입으로 세션/헤더를 구분한다.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -139,11 +142,26 @@ pub struct App {
     settings_path_editing: bool,
     /// 경로 편집 버퍼
     settings_path_input: String,
+
+    // ── FR-12/T5: FS 변경 자동 감지 (notify watcher) ──────────────────────
+    /// FS watcher 소유자 — drop 방지용. 실제로 poll은 watch_rx로.
+    _watcher: Option<notify::RecommendedWatcher>,
+    /// watcher 이벤트 수신 채널
+    watch_rx: Option<std::sync::mpsc::Receiver<()>>,
+    /// 마지막 이벤트 수신 시각 (300ms 디바운스)
+    watch_debounce: Option<std::time::Instant>,
 }
 
 impl App {
     pub fn new(state: AppState, config: Config) -> Self {
         let settings_draft = config.clone();
+
+        // watcher 시작 (실패해도 TUI는 계속 동작)
+        let (_watcher, watch_rx) = match crate::service::start_watcher(&state.projects_root) {
+            Ok((w, rx)) => (Some(w), Some(rx)),
+            Err(_) => (None, None),
+        };
+
         App {
             state,
             config,
@@ -181,6 +199,10 @@ impl App {
             settings_cursor: 0,
             settings_path_editing: false,
             settings_path_input: String::new(),
+
+            _watcher,
+            watch_rx,
+            watch_debounce: None,
         }
     }
 
@@ -369,13 +391,12 @@ impl App {
                             let preview_content = self.current_preview_content();
                             let preview_title = self.current_session_title();
                             let preview_path = self.current_session_cwd();
-                            render_list(
+                            facet_view::render(
                                 f,
+                                f.area(),
                                 &self.state,
                                 self.cursor,
                                 search_mode,
-                                &self.state.selected_ids.clone(),
-                                self.status_message.as_deref(),
                                 self.preview_open,
                                 preview_content,
                                 &preview_title,
@@ -395,6 +416,22 @@ impl App {
                     {
                         return Ok(());
                     }
+                }
+            }
+
+            // FS 변경 감지 poll (notify watcher)
+            if let Some(ref rx) = self.watch_rx {
+                if rx.try_recv().is_ok() {
+                    // 채널 drain (누적 이벤트 정리)
+                    while rx.try_recv().is_ok() {}
+                    self.watch_debounce = Some(std::time::Instant::now());
+                }
+            }
+            // 300ms 디바운스 후 reload
+            if let Some(t) = self.watch_debounce {
+                if t.elapsed() >= std::time::Duration::from_millis(300) {
+                    self.watch_debounce = None;
+                    self.reload_sessions()?;
                 }
             }
         }
@@ -565,23 +602,42 @@ impl App {
                 self.open_age_select();
             }
 
-            // ── FR-09: 그룹 모드 토글 (g) ────────────────────────────────
-            KeyCode::Char('g') => {
-                self.state.grouped = !self.state.grouped;
-                self.cursor = 0;
+            // ── FR-15: facet 탭 전환 (Tab / Shift+Tab, 1-4) ──────────────
+            KeyCode::Tab => {
+                let current_id = self.current_session().map(|s| s.session_id.clone());
+                self.state.facet = self.state.facet.next();
+                if let Some(id) = current_id {
+                    self.state.cursor_identity = Some(id);
+                    self.restore_cursor_in_facet();
+                } else {
+                    self.cursor = 0;
+                }
             }
 
-            // ── FR-09: 그룹 접기/펼치기 (Tab) ────────────────────────────
-            KeyCode::Tab => {
-                if self.state.grouped {
-                    let cwd_opt = self.current_group_cwd();
-                    if let Some(cwd) = cwd_opt {
-                        if self.state.collapsed_projects.contains(&cwd) {
-                            self.state.collapsed_projects.remove(&cwd);
-                        } else {
-                            self.state.collapsed_projects.insert(cwd);
+            KeyCode::BackTab => {
+                let current_id = self.current_session().map(|s| s.session_id.clone());
+                self.state.facet = self.state.facet.prev();
+                if let Some(id) = current_id {
+                    self.state.cursor_identity = Some(id);
+                    self.restore_cursor_in_facet();
+                } else {
+                    self.cursor = 0;
+                }
+            }
+
+            KeyCode::Char('1') | KeyCode::Char('2') | KeyCode::Char('3') | KeyCode::Char('4') => {
+                if let KeyCode::Char(c) = code {
+                    if let Some(d) = c.to_digit(10) {
+                        if let Some(new_facet) = crate::facet::Facet::from_digit(d) {
+                            let current_id = self.current_session().map(|s| s.session_id.clone());
+                            self.state.facet = new_facet;
+                            if let Some(id) = current_id {
+                                self.state.cursor_identity = Some(id);
+                                self.restore_cursor_in_facet();
+                            } else {
+                                self.cursor = 0;
+                            }
                         }
-                        self.clamp_cursor();
                     }
                 }
             }
@@ -629,6 +685,13 @@ impl App {
                 if let Some(session) = self.current_session() {
                     match resume_session(session) {
                         ResumeResult::Ready { cwd, session_id } => {
+                            if self.config.resume_mode == ResumeMode::Spawn {
+                                // Spawn 모드: 새 터미널 창 시도, claudedesk는 종료하지 않음
+                                let msg = exec_resume_spawn(&cwd, &session_id);
+                                self.status_message = Some(msg);
+                                return Ok(false);
+                            }
+                            // Handoff 모드(기본): 기존 동작 그대로
                             self.pending_resume = Some((cwd, session_id));
                             return Ok(true);
                         }
@@ -673,6 +736,11 @@ impl App {
                 if let Some(session) = self.current_session() {
                     match resume_session(session) {
                         ResumeResult::Ready { cwd, session_id } => {
+                            if self.config.resume_mode == ResumeMode::Spawn {
+                                let msg = exec_resume_spawn(&cwd, &session_id);
+                                self.status_message = Some(msg);
+                                return Ok(false);
+                            }
                             self.pending_resume = Some((cwd, session_id));
                             return Ok(true);
                         }
@@ -1322,18 +1390,6 @@ impl App {
         }
     }
 
-    /// 현재 커서가 속한 그룹의 cwd 반환
-    fn current_group_cwd(&self) -> Option<String> {
-        let rows = self.state.display_rows();
-        match rows.get(self.cursor)? {
-            DisplayRow::Header { cwd, .. } => Some(cwd.clone()),
-            DisplayRow::Session(real_idx) => {
-                let session = self.state.sessions.get(*real_idx)?;
-                Some(session.cwd.clone())
-            }
-        }
-    }
-
     /// 커서를 display_rows 범위 내로 클램프
     fn clamp_cursor(&mut self) {
         let len = self.state.display_rows().len();
@@ -1341,6 +1397,21 @@ impl App {
             self.cursor = 0;
         } else if self.cursor >= len {
             self.cursor = len - 1;
+        }
+    }
+
+    /// FR-15: facet 필터된 indices에서 cursor_identity 기준으로 cursor 복원
+    fn restore_cursor_in_facet(&mut self) {
+        if let Some(id) = &self.state.cursor_identity {
+            let facet_indices = crate::facet::facet_indices(&self.state);
+            for (i, &real_idx) in facet_indices.iter().enumerate() {
+                if self.state.sessions[real_idx].session_id == *id {
+                    self.cursor = i;
+                    return;
+                }
+            }
+            // fallback
+            self.cursor = 0;
         }
     }
 
@@ -1429,5 +1500,39 @@ impl App {
         self.current_session()
             .map(|s| s.cwd.clone())
             .unwrap_or_default()
+    }
+
+    /// 현재 커서 위치의 세션 session_id 반환
+    fn current_session_id(&self) -> Option<String> {
+        let indices = crate::facet::facet_indices(&self.state);
+        indices
+            .get(self.cursor)
+            .and_then(|&i| self.state.sessions.get(i))
+            .map(|s| s.session_id.clone())
+    }
+
+    /// FS 변경 감지 시 세션 목록 재로드. cursor_identity로 커서 위치 복원.
+    fn reload_sessions(&mut self) -> Result<()> {
+        // 현재 커서 세션 id 저장
+        self.state.cursor_identity = self.current_session_id();
+
+        let service = crate::service::SessionService::new(self.config.clone());
+        if let Ok(mut new_state) = crate::service::AppState::build(&service) {
+            // 기존 UI 상태 이어받기
+            new_state.facet = self.state.facet;
+            new_state.launch_cwd = self.state.launch_cwd.clone();
+            new_state.cursor_identity = self.state.cursor_identity.clone();
+            new_state.sort = self.state.sort;
+            new_state.search_query = self.state.search_query.clone();
+            new_state.grouped = self.state.grouped;
+            new_state.collapsed_projects = self.state.collapsed_projects.clone();
+            self.state = new_state;
+            // 커서 복원
+            if let Some(row) = self.state.restore_cursor() {
+                self.cursor = row;
+            }
+        }
+        // reload 실패 시 현재 상태 유지
+        Ok(())
     }
 }

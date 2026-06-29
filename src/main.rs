@@ -6,7 +6,7 @@ use std::env;
 use std::path::PathBuf;
 
 use claudedesk::config::{CliOverrides, Config};
-use claudedesk::service::{AppState, SessionService};
+use claudedesk::service::{format_session_list, AppState, SessionService};
 use claudedesk::ui::App;
 
 fn main() -> Result<()> {
@@ -23,6 +23,7 @@ fn main() -> Result<()> {
         return Ok(());
     }
 
+    let list_mode = args.contains(&"--list".to_string());
     let verbose = args.contains(&"--verbose".to_string());
     let no_color = args.contains(&"--no-color".to_string());
 
@@ -31,6 +32,10 @@ fn main() -> Result<()> {
 
     // --sort <key_dir> (예: "title_asc")
     let sort = parse_arg_value(&args, "--sort");
+
+    // --facet <name> (recent/active/cleanup/project)
+    let initial_facet =
+        parse_arg_value(&args, "--facet").and_then(|v| claudedesk::facet::Facet::parse(&v));
 
     // --config <path>
     let config_path = parse_arg_value(&args, "--config").map(PathBuf::from);
@@ -44,12 +49,23 @@ fn main() -> Result<()> {
     };
 
     let config = Config::load(&cli)?;
-    // App에도 Config를 전달해야 하므로 먼저 클론 (T11.2: 설정 화면, T11.3: 색상 제어)
-    let config_for_app = config.clone();
-    let service = SessionService::new(config);
-    let state = AppState::build(&service)?;
+    let service = SessionService::new(config.clone());
+    let mut state = AppState::build(&service)?;
 
-    let mut app = App::new(state, config_for_app);
+    // --facet 인자 적용
+    if let Some(f) = initial_facet {
+        state.facet = f;
+    }
+
+    // --list: TUI 없이 세션 목록을 stdout에 출력하고 종료 (스크립팅·진단용)
+    if list_mode {
+        let output = format_session_list(&state.sessions);
+        println!("{}", output);
+        return Ok(());
+    }
+
+    // App에도 Config를 전달해야 하므로 클론 (T11.2: 설정 화면, T11.3: 색상 제어)
+    let mut app = App::new(state, config);
     app.run()?;
 
     Ok(())
@@ -69,8 +85,10 @@ Claude Code 세션 관리자 TUI
 옵션:
   --root <path>      세션 루트 경로 지정 (기본: ~/.claude/projects)
   --sort <key_dir>   정렬 기준 (예: title_asc, modified_desc, created_asc, messages_desc)
+  --facet <name>     초기 탭 (recent/active/cleanup/project)
   --no-color         색상 비활성화 (Theme::Mono 강제)
   --config <path>    설정 파일 경로 지정 (기본: ~/.claude/claudedesk/config.toml)
+  --list             세션 목록을 탭 구분 텍스트로 stdout 출력 후 종료 (스크립팅·진단용)
   --verbose          상세 로그 출력
   --version          버전 정보 출력
   --help             이 도움말 출력

@@ -480,6 +480,7 @@ fn test_sort_and_filter_regression() {
             skipped_lines: 0,
             alias: None,
             search_text,
+            health: claudedesk::health::Health::Active,
         }
     };
 
@@ -512,6 +513,9 @@ fn test_sort_and_filter_regression() {
         grouped: false,
         collapsed_projects: HashSet::new(),
         aliases: claudedesk::alias::AliasStore::default(),
+        facet: claudedesk::facet::Facet::Recent,
+        launch_cwd: "/tmp".to_string(),
+        cursor_identity: None,
     };
     let idx = state.filtered_indices();
     assert_eq!(idx.len(), 1, "검색 결과가 1개여야 함");
