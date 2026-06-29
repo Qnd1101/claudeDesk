@@ -503,7 +503,7 @@ impl App {
                 }
             }
             KeyCode::Down | KeyCode::Char('j') => {
-                let count = self.state.display_rows().len();
+                let count = crate::facet::facet_indices(&self.state).len();
                 if count > 0 && self.cursor < count - 1 {
                     self.cursor += 1;
                 }
@@ -512,7 +512,7 @@ impl App {
                 self.cursor = 0;
             }
             KeyCode::End => {
-                let count = self.state.display_rows().len();
+                let count = crate::facet::facet_indices(&self.state).len();
                 if count > 0 {
                     self.cursor = count - 1;
                 }
@@ -521,7 +521,9 @@ impl App {
                 self.cursor = self.cursor.saturating_sub(10);
             }
             KeyCode::PageDown => {
-                let max = self.state.display_rows().len().saturating_sub(1);
+                let max = crate::facet::facet_indices(&self.state)
+                    .len()
+                    .saturating_sub(1);
                 self.cursor = (self.cursor + 10).min(max);
             }
 
@@ -562,9 +564,7 @@ impl App {
 
             // ── M2: 전체선택/해제 토글 (a, §5-2) ───────────────────────
             KeyCode::Char('a') => {
-                let visible_ids: Vec<String> = self
-                    .state
-                    .filtered_indices()
+                let visible_ids: Vec<String> = crate::facet::facet_indices(&self.state)
                     .iter()
                     .filter_map(|&i| self.state.sessions.get(i))
                     .map(|s| s.session_id.clone())
@@ -759,7 +759,7 @@ impl App {
                 }
             }
             KeyCode::Down | KeyCode::Char('j') => {
-                let count = self.state.display_rows().len();
+                let count = crate::facet::facet_indices(&self.state).len();
                 if count > 0 && self.cursor < count - 1 {
                     self.cursor += 1;
                 }
@@ -1381,18 +1381,17 @@ impl App {
         self.cursor = 0;
     }
 
-    /// 현재 커서가 가리키는 세션 참조 (display_rows 경유)
+    /// 현재 커서가 가리키는 세션 참조 (facet_indices 경유)
     fn current_session(&self) -> Option<&crate::domain::Session> {
-        let rows = self.state.display_rows();
-        match rows.get(self.cursor)? {
-            DisplayRow::Session(real_idx) => self.state.sessions.get(*real_idx),
-            DisplayRow::Header { .. } => None,
-        }
+        let indices = crate::facet::facet_indices(&self.state);
+        indices
+            .get(self.cursor)
+            .and_then(|&real_idx| self.state.sessions.get(real_idx))
     }
 
-    /// 커서를 display_rows 범위 내로 클램프
+    /// 커서를 facet_indices 범위 내로 클램프
     fn clamp_cursor(&mut self) {
-        let len = self.state.display_rows().len();
+        let len = crate::facet::facet_indices(&self.state).len();
         if len == 0 {
             self.cursor = 0;
         } else if self.cursor >= len {
@@ -1528,9 +1527,7 @@ impl App {
             new_state.collapsed_projects = self.state.collapsed_projects.clone();
             self.state = new_state;
             // 커서 복원
-            if let Some(row) = self.state.restore_cursor() {
-                self.cursor = row;
-            }
+            self.restore_cursor_in_facet();
         }
         // reload 실패 시 현재 상태 유지
         Ok(())
