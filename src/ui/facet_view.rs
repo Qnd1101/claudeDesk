@@ -106,7 +106,7 @@ fn render_left(
     area: Rect,
     state: &AppState,
     cursor: usize,
-    _search_mode: bool,
+    search_mode: bool,
     color_enabled: bool,
     time_format: TimeFormat,
 ) {
@@ -114,22 +114,65 @@ fn render_left(
         return; // 최소 높이 확인
     }
 
-    let layout = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
+    let constraints: Vec<Constraint> = if search_mode {
+        vec![
+            Constraint::Length(2), // facet 탭바
+            Constraint::Length(1), // 검색바
+            Constraint::Min(1),    // 세션 목록
+        ]
+    } else {
+        vec![
             Constraint::Length(2), // facet 탭바
             Constraint::Min(1),    // 세션 목록
-        ])
+        ]
+    };
+
+    let layout = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints(constraints)
         .split(area);
 
     let facet_area = layout[0];
-    let list_area = layout[1];
+    let (search_area_opt, list_area) = if search_mode {
+        (Some(layout[1]), layout[2])
+    } else {
+        (None, layout[1])
+    };
 
     // 상단 facet 탭바
     render_facet_tabs(f, facet_area, state, color_enabled);
 
-    // 하단 세션 목록
-    render_session_list(f, list_area, state, cursor, color_enabled, time_format);
+    // 검색바 (search_mode 진입 시)
+    if let Some(search_area) = search_area_opt {
+        let query = state.search_query.as_deref().unwrap_or("");
+        let match_count = facet::facet_indices(state).len();
+        let search_line = Line::from(vec![
+            Span::styled("/", cond_fg_bold(color_enabled, Color::Green)),
+            Span::raw(query.to_string()),
+            Span::styled("│", Style::default()),
+            Span::styled(
+                format!(" ({match_count}건)"),
+                cond_fg(color_enabled, Color::DarkGray),
+            ),
+        ]);
+        f.render_widget(Paragraph::new(search_line), search_area);
+    }
+
+    // 세션 목록
+    let active_query = if search_mode {
+        state.search_query.as_deref().unwrap_or("")
+    } else {
+        ""
+    };
+    render_session_list(
+        f,
+        list_area,
+        state,
+        cursor,
+        color_enabled,
+        time_format,
+        active_query,
+    );
 }
 
 /// 우측 패널 렌더 (preview)
@@ -236,6 +279,7 @@ fn render_session_list(
     cursor: usize,
     color_enabled: bool,
     time_format: TimeFormat,
+    search_query: &str,
 ) {
     // facet 필터된 indices
     let facet_indices = facet::facet_indices(state);
@@ -288,11 +332,13 @@ fn render_session_list(
             let title_text = safe_truncate(session.display_title(), 30);
             let time_text = format_time(&session.modified, time_format);
 
-            let cells = vec![
-                Cell::from(marker_text),
-                Cell::from(title_text),
-                Cell::from(time_text),
-            ];
+            let title_cell = if search_query.is_empty() {
+                Cell::from(title_text)
+            } else {
+                Cell::from(highlight_query(&title_text, search_query))
+            };
+
+            let cells = vec![Cell::from(marker_text), title_cell, Cell::from(time_text)];
 
             Row::new(cells).style(style_override)
         })
@@ -320,6 +366,30 @@ fn render_session_list(
     f.render_stateful_widget(table, area, &mut table_state);
 }
 
+/// 검색 쿼리와 일치하는 부분에 밑줄 강조를 적용한 Line 반환 (색 무관, UNDERLINED).
+/// 일치 없으면 plain text Line 반환.
+fn highlight_query(text: &str, query: &str) -> Line<'static> {
+    if query.is_empty() {
+        return Line::from(text.to_string());
+    }
+    let lower_text = text.to_lowercase();
+    let lower_query = query.to_lowercase();
+    if let Some(byte_pos) = lower_text.find(lower_query.as_str()) {
+        let end_pos = byte_pos + query.len();
+        if text.is_char_boundary(byte_pos) && text.is_char_boundary(end_pos) {
+            let before = text[..byte_pos].to_string();
+            let matched = text[byte_pos..end_pos].to_string();
+            let after = text[end_pos..].to_string();
+            return Line::from(vec![
+                Span::raw(before),
+                Span::styled(matched, Style::default().add_modifier(Modifier::UNDERLINED)),
+                Span::raw(after),
+            ]);
+        }
+    }
+    Line::from(text.to_string())
+}
+
 /// 문자열을 지정된 폭으로 안전하게 자름 (유니코드 인식)
 fn safe_truncate(s: &str, max_width: usize) -> String {
     use unicode_width::UnicodeWidthStr;
@@ -341,4 +411,58 @@ fn safe_truncate(s: &str, max_width: usize) -> String {
     }
 
     result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn highlight_empty_query_returns_single_span() {
+        let line = highlight_query("hello world", "");
+        assert_eq!(line.spans.len(), 1);
+        assert_eq!(line.spans[0].content, "hello world");
+    }
+
+    #[test]
+    fn highlight_no_match_returns_single_span() {
+        let line = highlight_query("hello world", "xyz");
+        assert_eq!(line.spans.len(), 1);
+    }
+
+    #[test]
+    fn highlight_match_splits_three_spans() {
+        let line = highlight_query("hello world", "world");
+        assert_eq!(line.spans.len(), 3);
+        assert_eq!(line.spans[0].content, "hello ");
+        assert_eq!(line.spans[1].content, "world");
+        assert_eq!(line.spans[2].content, "");
+        // 밑줄 스타일 확인
+        assert!(line.spans[1]
+            .style
+            .add_modifier
+            .contains(Modifier::UNDERLINED));
+    }
+
+    #[test]
+    fn highlight_case_insensitive_preserves_original_case() {
+        let line = highlight_query("Hello World", "hello");
+        assert_eq!(line.spans.len(), 3);
+        assert_eq!(line.spans[1].content, "Hello"); // 원본 대소문자 유지
+    }
+
+    #[test]
+    fn highlight_match_at_start() {
+        let line = highlight_query("docker build", "docker");
+        assert_eq!(line.spans[0].content, ""); // before = empty
+        assert_eq!(line.spans[1].content, "docker");
+    }
+
+    #[test]
+    fn highlight_match_at_end() {
+        let line = highlight_query("cargo build", "build");
+        assert_eq!(line.spans[0].content, "cargo ");
+        assert_eq!(line.spans[1].content, "build");
+        assert_eq!(line.spans[2].content, "");
+    }
 }
