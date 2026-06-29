@@ -19,9 +19,11 @@ use std::collections::HashSet;
 use std::io::stdout;
 use std::time::Duration;
 
-use crate::config::{expand_tilde, Config};
+use crate::config::{expand_tilde, Config, ResumeMode};
 use crate::preview::{read_preview, PreviewContent, MAX_PREVIEW_BYTES, MAX_PREVIEW_LINES};
-use crate::service::{exec_resume, resume_session, AppState, DisplayRow, ResumeResult};
+use crate::service::{
+    exec_resume, exec_resume_spawn, resume_session, AppState, DisplayRow, ResumeResult,
+};
 
 /// 미리보기 캐시 키 — 타입으로 세션/헤더를 구분한다.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -629,6 +631,13 @@ impl App {
                 if let Some(session) = self.current_session() {
                     match resume_session(session) {
                         ResumeResult::Ready { cwd, session_id } => {
+                            if self.config.resume_mode == ResumeMode::Spawn {
+                                // Spawn 모드: 새 터미널 창 시도, claudedesk는 종료하지 않음
+                                let msg = exec_resume_spawn(&cwd, &session_id);
+                                self.status_message = Some(msg);
+                                return Ok(false);
+                            }
+                            // Handoff 모드(기본): 기존 동작 그대로
                             self.pending_resume = Some((cwd, session_id));
                             return Ok(true);
                         }
@@ -673,6 +682,11 @@ impl App {
                 if let Some(session) = self.current_session() {
                     match resume_session(session) {
                         ResumeResult::Ready { cwd, session_id } => {
+                            if self.config.resume_mode == ResumeMode::Spawn {
+                                let msg = exec_resume_spawn(&cwd, &session_id);
+                                self.status_message = Some(msg);
+                                return Ok(false);
+                            }
                             self.pending_resume = Some((cwd, session_id));
                             return Ok(true);
                         }

@@ -425,6 +425,134 @@ pub fn which_claude() -> Option<std::path::PathBuf> {
     None
 }
 
+// ── --list 출력 ───────────────────────────────────────────────────────────────
+
+/// 세션 슬라이스를 탭 구분 텍스트로 변환 (`--list` 플래그용 순수 함수).
+///
+/// 출력 형식:
+/// - 1행: `#title\tsession_id\tcwd\tmodified_epoch\tmsg_count\tactive\tskipped_lines` (주석 헤더)
+/// - 이후: 1세션/1행, 각 컬럼은 탭 구분
+/// - `active`: 0 또는 1
+/// - `modified_epoch`: UNIX 에포크 초
+pub fn format_session_list(sessions: &[crate::domain::Session]) -> String {
+    use std::time::UNIX_EPOCH;
+
+    let mut lines = Vec::with_capacity(sessions.len() + 1);
+    lines.push(
+        "#title\tsession_id\tcwd\tmodified_epoch\tmsg_count\tactive\tskipped_lines".to_string(),
+    );
+
+    for s in sessions {
+        let title = s.display_title();
+        let epoch = s
+            .modified
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        let active = u8::from(s.is_active);
+        lines.push(format!(
+            "{}\t{}\t{}\t{}\t{}\t{}\t{}",
+            title, s.session_id, s.cwd, epoch, s.msg_count, active, s.skipped_lines
+        ));
+    }
+
+    lines.join("\n")
+}
+
+// ── spawn resume ───────────────────────────────────────────────────────────────
+
+/// OS와 Linux 터미널 힌트를 주입받아 spawn 명령 후보 목록을 반환 (순수 함수, 테스트 가능).
+///
+/// - Windows: `wt.exe` 우선, `cmd /c start` 폴백
+/// - macOS: `osascript` Terminal 스크립트
+/// - 기타(Linux): `linux_terminal -e "..."`
+/// - 빈 `cwd` → `"."` 폴백
+///
+/// 반환값: `(program, args)` 후보 Vec — 앞에서부터 순서대로 시도.
+pub fn build_spawn_candidates_for_os(
+    cwd: &str,
+    session_id: &str,
+    os: &str,
+    linux_terminal: &str,
+) -> Vec<(String, Vec<String>)> {
+    let effective_cwd = if cwd.is_empty() { "." } else { cwd };
+
+    match os {
+        "windows" => vec![
+            (
+                "wt.exe".to_string(),
+                vec![
+                    "-d".to_string(),
+                    effective_cwd.to_string(),
+                    "claude".to_string(),
+                    "--resume".to_string(),
+                    session_id.to_string(),
+                ],
+            ),
+            (
+                "cmd".to_string(),
+                vec![
+                    "/c".to_string(),
+                    "start".to_string(),
+                    String::new(),
+                    "/D".to_string(),
+                    effective_cwd.to_string(),
+                    "cmd".to_string(),
+                    "/k".to_string(),
+                    format!("claude --resume {}", session_id),
+                ],
+            ),
+        ],
+        "macos" => {
+            let escaped = effective_cwd.replace('\'', "'\\''");
+            let script = format!(
+                "tell app \"Terminal\" to do script \"cd '{}' && claude --resume {}\"",
+                escaped, session_id
+            );
+            vec![("osascript".to_string(), vec!["-e".to_string(), script])]
+        }
+        _ => {
+            // Linux: $TERMINAL(인자로 주입) -e "cd '...' && claude --resume <id>"
+            let escaped = effective_cwd.replace('\'', "'\\''");
+            let cmd = format!("cd '{}' && claude --resume {}", escaped, session_id);
+            vec![(linux_terminal.to_string(), vec!["-e".to_string(), cmd])]
+        }
+    }
+}
+
+/// 실행 환경 OS에 맞는 spawn 명령 후보 목록 반환.
+/// Linux에서는 `$TERMINAL` 환경변수 우선, 없으면 `x-terminal-emulator` 폴백.
+pub fn build_spawn_command_candidates(cwd: &str, session_id: &str) -> Vec<(String, Vec<String>)> {
+    let linux_terminal =
+        std::env::var("TERMINAL").unwrap_or_else(|_| "x-terminal-emulator".to_string());
+    build_spawn_candidates_for_os(cwd, session_id, std::env::consts::OS, &linux_terminal)
+}
+
+/// Spawn 모드 resume: 새 터미널 창에서 `claude --resume <id>` 를 띄우고 상태 메시지 반환.
+/// 모든 후보가 실패해도 패닉 없이 graceful 반환 (크래시 금지).
+pub fn exec_resume_spawn(cwd: &str, session_id: &str) -> String {
+    let candidates = build_spawn_command_candidates(cwd, session_id);
+    let effective_cwd = if cwd.is_empty() { "." } else { cwd };
+
+    for (program, args) in &candidates {
+        if Command::new(program)
+            .args(args)
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .is_ok()
+        {
+            return format!("새 터미널에서 claude --resume {} 시작됨", session_id);
+        }
+    }
+
+    format!(
+        "터미널 열기 실패 — 수동 실행: cd \"{}\" && claude --resume {}",
+        effective_cwd, session_id
+    )
+}
+
 // ── 정렬 유닛 테스트 ──────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -1058,5 +1186,145 @@ mod tests {
         let cutoff = SystemTime::now() - Duration::from_secs(30 * DAY);
         let ids = state.older_than_ids(cutoff);
         assert_eq!(ids, vec!["docker-old"], "검색에 가려진 세션은 대상 제외");
+    }
+
+    // ── format_session_list 유닛 테스트 ──────────────────────────────────────
+
+    /// 빈 목록 → 헤더 행만 반환
+    #[test]
+    fn test_format_session_list_empty() {
+        let out = format_session_list(&[]);
+        assert_eq!(
+            out,
+            "#title\tsession_id\tcwd\tmodified_epoch\tmsg_count\tactive\tskipped_lines"
+        );
+    }
+
+    /// 세션 1개: 탭이 6개(=7컬럼 구분), 컬럼 순서 확인
+    #[test]
+    fn test_format_session_list_columns_and_tabs() {
+        let s = make_session("My Title", 0, 42);
+        let out = format_session_list(&[s]);
+        let lines: Vec<&str> = out.split('\n').collect();
+        assert_eq!(lines.len(), 2, "헤더+데이터 2행 필요");
+        let data_cols: Vec<&str> = lines[1].split('\t').collect();
+        assert_eq!(data_cols.len(), 7, "데이터 행에 탭 구분 7컬럼 필요");
+        assert_eq!(data_cols[0], "My Title", "첫 컬럼=제목");
+        assert_eq!(data_cols[4], "42", "다섯 번째 컬럼=msg_count");
+    }
+
+    /// is_active=true → active 컬럼 "1", false → "0"
+    #[test]
+    fn test_format_session_list_active_marker() {
+        let mut active = make_session("A", 0, 1);
+        active.is_active = true;
+        let inactive = make_session("B", 0, 1);
+
+        let out = format_session_list(&[active, inactive]);
+        let lines: Vec<&str> = out.split('\n').collect();
+        let active_cols: Vec<&str> = lines[1].split('\t').collect();
+        let inactive_cols: Vec<&str> = lines[2].split('\t').collect();
+        assert_eq!(active_cols[5], "1", "활성 세션 active=1");
+        assert_eq!(inactive_cols[5], "0", "비활성 세션 active=0");
+    }
+
+    /// 별칭이 있으면 title 컬럼에 별칭 출력 (display_title 우선)
+    #[test]
+    fn test_format_session_list_uses_alias_as_title() {
+        let mut s = make_session("Original", 0, 1);
+        s.alias = Some("MyAlias".to_string());
+        let out = format_session_list(&[s]);
+        let data_line = out.split('\n').nth(1).unwrap();
+        assert!(
+            data_line.starts_with("MyAlias\t"),
+            "별칭이 제목 컬럼에 출력돼야 함"
+        );
+    }
+
+    // ── build_spawn_candidates_for_os 유닛 테스트 ────────────────────────────
+
+    /// Windows: 첫 번째 후보(wt.exe)에 --resume과 session_id가 있어야 함
+    #[test]
+    fn test_build_spawn_windows_first_candidate_has_resume() {
+        let candidates =
+            build_spawn_candidates_for_os("/some/cwd", "test-session-id", "windows", "");
+        assert!(!candidates.is_empty(), "Windows 후보가 비어있음");
+        let (prog, args) = &candidates[0];
+        assert_eq!(prog, "wt.exe");
+        assert!(
+            args.contains(&"--resume".to_string()),
+            "wt.exe args에 --resume 없음"
+        );
+        assert!(
+            args.contains(&"test-session-id".to_string()),
+            "wt.exe args에 session_id 없음"
+        );
+    }
+
+    /// Windows: 첫 번째 후보(wt.exe) args에 cwd가 포함돼야 함
+    #[test]
+    fn test_build_spawn_windows_contains_cwd() {
+        let candidates = build_spawn_candidates_for_os("D:\\Dev\\project", "sid", "windows", "");
+        let (_, args) = &candidates[0];
+        assert!(
+            args.contains(&"D:\\Dev\\project".to_string()),
+            "wt.exe args에 cwd 없음"
+        );
+    }
+
+    /// Windows: 빈 cwd → "." 폴백
+    #[test]
+    fn test_build_spawn_empty_cwd_uses_dot() {
+        let candidates = build_spawn_candidates_for_os("", "sid", "windows", "");
+        let (_, args) = &candidates[0];
+        assert!(args.contains(&".".to_string()), "빈 cwd → '.' 폴백 없음");
+    }
+
+    /// Windows: 두 번째 후보(cmd) 폴백도 --resume 포함
+    #[test]
+    fn test_build_spawn_windows_fallback_has_resume() {
+        let candidates = build_spawn_candidates_for_os("/cwd", "mysid", "windows", "");
+        assert!(candidates.len() >= 2, "Windows는 2개 이상 후보 필요");
+        let (prog, args) = &candidates[1];
+        assert_eq!(prog, "cmd");
+        // cmd /k 에 --resume이 포함된 문자열이 있어야 함
+        let joined = args.join(" ");
+        assert!(joined.contains("--resume"), "cmd 폴백 args에 --resume 없음");
+        assert!(joined.contains("mysid"), "cmd 폴백 args에 session_id 없음");
+    }
+
+    /// macOS: osascript 스크립트에 --resume과 session_id, cwd 포함
+    #[test]
+    fn test_build_spawn_macos_script_contains_resume() {
+        let candidates = build_spawn_candidates_for_os("/home/user/proj", "mac-sid", "macos", "");
+        assert_eq!(candidates.len(), 1);
+        let (prog, args) = &candidates[0];
+        assert_eq!(prog, "osascript");
+        let script = args.join(" ");
+        assert!(
+            script.contains("--resume"),
+            "macOS 스크립트에 --resume 없음"
+        );
+        assert!(
+            script.contains("mac-sid"),
+            "macOS 스크립트에 session_id 없음"
+        );
+        assert!(
+            script.contains("/home/user/proj"),
+            "macOS 스크립트에 cwd 없음"
+        );
+    }
+
+    /// Linux: linux_terminal -e "..." args에 --resume과 session_id 포함
+    #[test]
+    fn test_build_spawn_linux_uses_terminal_and_contains_resume() {
+        let candidates =
+            build_spawn_candidates_for_os("/home/user", "lsid", "linux", "my-terminal");
+        assert_eq!(candidates.len(), 1);
+        let (prog, args) = &candidates[0];
+        assert_eq!(prog, "my-terminal", "Linux terminal 프로그램 불일치");
+        let cmd = args.join(" ");
+        assert!(cmd.contains("--resume"), "Linux args에 --resume 없음");
+        assert!(cmd.contains("lsid"), "Linux args에 session_id 없음");
     }
 }
