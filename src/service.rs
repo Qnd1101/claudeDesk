@@ -580,6 +580,8 @@ mod tests {
             grouped: false,
             collapsed_projects: std::collections::HashSet::new(),
             aliases: crate::alias::AliasStore::default(),
+            facet: crate::facet::Facet::Recent,
+            launch_cwd: "/tmp".to_string(),
         };
         let idx = state.filtered_indices();
         assert_eq!(idx, vec![0, 1]);
@@ -601,6 +603,8 @@ mod tests {
             grouped: false,
             collapsed_projects: std::collections::HashSet::new(),
             aliases: crate::alias::AliasStore::default(),
+            facet: crate::facet::Facet::Recent,
+            launch_cwd: "/tmp".to_string(),
         };
         let idx = state.filtered_indices();
         assert_eq!(idx, vec![0, 2]);
@@ -621,6 +625,8 @@ mod tests {
             grouped: false,
             collapsed_projects: std::collections::HashSet::new(),
             aliases: crate::alias::AliasStore::default(),
+            facet: crate::facet::Facet::Recent,
+            launch_cwd: "/tmp".to_string(),
         };
         let idx = state.filtered_indices();
         assert_eq!(idx, vec![0]);
@@ -694,6 +700,8 @@ mod tests {
             grouped: false,
             collapsed_projects: std::collections::HashSet::new(),
             aliases: crate::alias::AliasStore::default(),
+            facet: crate::facet::Facet::Recent,
+            launch_cwd: "/tmp".to_string(),
         };
         let rows = state.display_rows();
         assert_eq!(rows, vec![DisplayRow::Session(0), DisplayRow::Session(1)]);
@@ -714,6 +722,8 @@ mod tests {
             grouped: true,
             collapsed_projects: std::collections::HashSet::new(),
             aliases: crate::alias::AliasStore::default(),
+            facet: crate::facet::Facet::Recent,
+            launch_cwd: "/tmp".to_string(),
         };
         let rows = state.display_rows();
         // alpha (100 secs ago) is more recent -> alpha first
@@ -747,6 +757,8 @@ mod tests {
             grouped: true,
             collapsed_projects: collapsed,
             aliases: crate::alias::AliasStore::default(),
+            facet: crate::facet::Facet::Recent,
+            launch_cwd: "/tmp".to_string(),
         };
         let rows = state.display_rows();
         assert_eq!(rows.len(), 3);
@@ -790,6 +802,8 @@ mod tests {
             grouped: true,
             collapsed_projects: std::collections::HashSet::new(),
             aliases: crate::alias::AliasStore::default(),
+            facet: crate::facet::Facet::Recent,
+            launch_cwd: "/tmp".to_string(),
         };
         let rows = state.display_rows();
         match &rows[0] {
@@ -813,6 +827,8 @@ mod tests {
             grouped: true,
             collapsed_projects: std::collections::HashSet::new(),
             aliases: crate::alias::AliasStore::default(),
+            facet: crate::facet::Facet::Recent,
+            launch_cwd: "/tmp".to_string(),
         };
         let rows = state.display_rows();
         assert_eq!(rows.len(), 2);
@@ -850,6 +866,8 @@ mod tests {
             grouped: false,
             collapsed_projects: std::collections::HashSet::new(),
             aliases: crate::alias::AliasStore::default(),
+            facet: crate::facet::Facet::Recent,
+            launch_cwd: "/tmp".to_string(),
         };
         let idx = state.filtered_indices();
         assert_eq!(
@@ -881,6 +899,8 @@ mod tests {
             grouped: true,
             collapsed_projects: std::collections::HashSet::new(),
             aliases: crate::alias::AliasStore::default(),
+            facet: crate::facet::Facet::Recent,
+            launch_cwd: "/tmp".to_string(),
         }
     }
 
@@ -1010,6 +1030,8 @@ mod tests {
             grouped: false,
             collapsed_projects: std::collections::HashSet::new(),
             aliases: crate::alias::AliasStore::default(),
+            facet: crate::facet::Facet::Recent,
+            launch_cwd: "/tmp".to_string(),
         }
     }
 
