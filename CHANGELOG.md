@@ -5,6 +5,15 @@
 
 ## [Unreleased]
 
+## [0.16.0] - 2026-06-30
+
+### Added
+- **Light 테마 팔레트:** `Palette` 구조체(`dark` / `light` / `mono`)를 도입해 `Theme::Light` 선택 시 라이트 배경 터미널에 최적화된 색상 적용. `accent`=Blue, `body`=Black, `user_msg`=Blue (Dark 대비 Cyan→Blue, White→Black 전환). Mono는 `enabled=false`로 색상 전체 무효화 유지 (`src/ui/theme.rs`).
+- **`Palette` 일원화:** 전체 UI 레이어(`list`, `facet_view`, `modal`, `settings`, `help`, `preview`, `trash_view`)에서 `color_enabled: bool` 단일 플래그를 `Palette`로 교체 — `palette.fg(palette.<semantic>)` 호출로 테마별 색상 분기 단순화.
+
+### Tests
+- 185 테스트 통과, clippy `-D warnings`·fmt 그린.
+
 ## [0.15.0] - 2026-06-30
 
 ### Changed (코드 품질 A + 접근성 B)
