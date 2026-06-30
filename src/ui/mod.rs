@@ -42,6 +42,7 @@ use modal::{
     AgeSelectData, AliasEditData, DeleteConfirmData, PurgeConfirmData,
 };
 use settings::{render_settings, SettingsData, SETTINGS_ROW_COUNT};
+use theme::Palette;
 use trash_view::render_trash;
 
 /// FR-14: 오래된 세션 선택 모달의 기준 일수 프리셋
@@ -257,15 +258,25 @@ impl App {
     ) -> Result<()> {
         loop {
             terminal.draw(|f| {
-                let color_enabled = self.config.color_enabled();
+                let palette = if self.config.color_enabled() {
+                    Palette::from_theme(self.config.theme)
+                } else {
+                    Palette::mono()
+                };
                 let time_format = self.config.time_format;
                 if self.show_help {
-                    render_help(f);
+                    render_help(f, palette);
                 } else {
                     match &self.mode {
                         UiMode::Trash => {
                             let entries = self.trash_index.sorted_entries();
-                            render_trash(f, &entries, self.trash_cursor, &self.trash_selected);
+                            render_trash(
+                                f,
+                                &entries,
+                                self.trash_cursor,
+                                &self.trash_selected,
+                                palette,
+                            );
                         }
                         UiMode::DeleteConfirm => {
                             let preview_content = self.current_preview_content();
@@ -282,23 +293,29 @@ impl App {
                                 preview_content,
                                 &preview_title,
                                 &preview_path,
-                                color_enabled,
+                                palette,
                                 time_format,
                             );
                             let data = DeleteConfirmData {
                                 titles: &self.delete_titles,
                                 active_count: self.delete_active_count,
-                                color_enabled,
+                                palette,
                             };
                             render_delete_confirm(f, &data);
                         }
                         UiMode::PurgeConfirm => {
                             let entries = self.trash_index.sorted_entries();
-                            render_trash(f, &entries, self.trash_cursor, &self.trash_selected);
+                            render_trash(
+                                f,
+                                &entries,
+                                self.trash_cursor,
+                                &self.trash_selected,
+                                palette,
+                            );
                             let data = PurgeConfirmData {
                                 titles: &self.purge_titles,
                                 input: &self.purge_input,
-                                color_enabled,
+                                palette,
                             };
                             render_purge_confirm(f, &data);
                         }
@@ -317,13 +334,13 @@ impl App {
                                 preview_content,
                                 &preview_title,
                                 &preview_path,
-                                color_enabled,
+                                palette,
                                 time_format,
                             );
                             let data = AliasEditData {
                                 original_title: &self.alias_target_title,
                                 input: &self.alias_input,
-                                color_enabled,
+                                palette,
                             };
                             render_alias_edit(f, &data);
                         }
@@ -342,7 +359,7 @@ impl App {
                                 preview_content,
                                 &preview_title,
                                 &preview_path,
-                                color_enabled,
+                                palette,
                                 time_format,
                             );
                             // (기준 일수, 대상 수) 쌍으로 모달에 전달
@@ -354,7 +371,7 @@ impl App {
                             let data = AgeSelectData {
                                 options: &options,
                                 cursor: self.age_cursor,
-                                color_enabled,
+                                palette,
                             };
                             render_age_select(f, &data);
                         }
@@ -374,7 +391,7 @@ impl App {
                                 preview_content,
                                 &preview_title,
                                 &preview_path,
-                                color_enabled,
+                                palette,
                                 time_format,
                             );
                             let data = SettingsData {
@@ -382,7 +399,7 @@ impl App {
                                 cursor: self.settings_cursor,
                                 path_editing: self.settings_path_editing,
                                 path_input: &self.settings_path_input,
-                                color_enabled,
+                                palette,
                             };
                             render_settings(f, &data);
                         }
@@ -401,7 +418,7 @@ impl App {
                                 preview_content,
                                 &preview_title,
                                 &preview_path,
-                                color_enabled,
+                                palette,
                                 time_format,
                                 self.status_message.as_deref(),
                             );

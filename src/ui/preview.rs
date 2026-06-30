@@ -1,12 +1,12 @@
 /// FR-08 미리보기 패널 렌더러
 use ratatui::{
     layout::Rect,
-    style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Paragraph, Wrap},
     Frame,
 };
 
+use super::theme::Palette;
 use crate::preview::PreviewContent;
 
 /// 미리보기 패널을 area에 렌더한다.
@@ -14,12 +14,14 @@ use crate::preview::PreviewContent;
 /// - `content`: `read_preview`가 반환한 대화 내용
 /// - `session_title`: 패널 상단 타이틀에 표시할 세션 제목(짧게 잘라 사용)
 /// - `session_path`: 세션이 실행된 작업 디렉토리(cwd) 전체 경로. 빈 문자열이면 생략(①).
+/// - `palette`: 색상 팔레트
 pub fn render_preview(
     f: &mut Frame,
     area: Rect,
     content: &PreviewContent,
     session_title: &str,
     session_path: &str,
+    palette: Palette,
 ) {
     // 타이틀: "Preview — 세션제목(최대 20자)" 형식
     let short_title = truncate_title(session_title, 20);
@@ -37,9 +39,7 @@ pub fn render_preview(
         vec![
             Line::from(vec![Span::styled(
                 session_path.to_string(),
-                Style::default()
-                    .fg(Color::Yellow)
-                    .add_modifier(Modifier::BOLD),
+                palette.fg_bold(palette.warning),
             )]),
             Line::from(""),
         ]
@@ -50,18 +50,18 @@ pub fn render_preview(
         let mut lines = path_header;
         lines.push(Line::from(vec![Span::styled(
             "미리보기 없음",
-            Style::default().fg(Color::DarkGray),
+            palette.fg(palette.muted),
         )]));
         lines.push(Line::from(vec![Span::styled(
             "(세션에 대화 내용이 없습니다)",
-            Style::default().fg(Color::DarkGray),
+            palette.fg(palette.muted),
         )]));
         let p = Paragraph::new(lines)
             .block(
                 Block::default()
                     .borders(Borders::ALL)
                     .title(block_title)
-                    .border_style(Style::default().fg(Color::DarkGray)),
+                    .border_style(palette.fg(palette.muted)),
             )
             .wrap(Wrap { trim: false });
         f.render_widget(p, area);
@@ -78,22 +78,22 @@ pub fn render_preview(
         }
 
         // 역할 헤더
-        let (role_symbol, role_label, role_color) = if turn.role == "user" {
-            ("●", "user     ", Color::Cyan)
+        let (role_symbol, role_label, role_style) = if turn.role == "user" {
+            ("●", "user     ", palette.fg_bold(palette.user_msg))
         } else {
-            ("○", "assistant", Color::DarkGray)
+            ("○", "assistant", palette.fg_bold(palette.muted))
         };
 
         lines.push(Line::from(vec![Span::styled(
             format!("{} {}", role_symbol, role_label),
-            Style::default().fg(role_color).add_modifier(Modifier::BOLD),
+            role_style,
         )]));
 
         // 텍스트 본문: 개행 기준으로 각 줄을 Line으로 변환
         for text_line in turn.text.lines() {
             lines.push(Line::from(vec![Span::styled(
                 format!("  {}", text_line),
-                Style::default().fg(Color::White),
+                palette.fg(palette.body),
             )]));
         }
     }
@@ -103,7 +103,7 @@ pub fn render_preview(
         lines.push(Line::from(""));
         lines.push(Line::from(vec![Span::styled(
             "  … (미리보기 일부 — 전체는 Enter로 이어하기)",
-            Style::default().fg(Color::DarkGray),
+            palette.fg(palette.muted),
         )]));
     }
 
@@ -111,14 +111,14 @@ pub fn render_preview(
     if content.skipped_lines > 0 {
         lines.push(Line::from(vec![Span::styled(
             format!("  [파싱 불가 {}줄 스킵]", content.skipped_lines),
-            Style::default().fg(Color::DarkGray),
+            palette.fg(palette.muted),
         )]));
     }
 
     let block = Block::default()
         .borders(Borders::ALL)
         .title(block_title)
-        .border_style(Style::default().fg(Color::DarkGray));
+        .border_style(palette.fg(palette.muted));
 
     let paragraph = Paragraph::new(lines)
         .block(block)

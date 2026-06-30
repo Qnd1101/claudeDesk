@@ -1,7 +1,7 @@
 //! FR-15 facet 2-pane 뷰 렌더
 use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
-    style::{Color, Modifier, Style},
+    style::{Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Cell, Paragraph, Row, Table, TableState},
     Frame,
@@ -14,7 +14,7 @@ use crate::preview::PreviewContent;
 use crate::service::AppState;
 
 use super::preview::render_preview;
-use super::theme::{cond_fg, cond_fg_bold};
+use super::theme::Palette;
 use super::time::format_time;
 
 /// 2-pane facet 뷰 전체 렌더 (Normal 모드 진입점)
@@ -29,7 +29,7 @@ pub fn render(
     preview_content: Option<&PreviewContent>,
     preview_title: &str,
     preview_path: &str,
-    color_enabled: bool,
+    palette: Palette,
     time_format: TimeFormat,
     status_message: Option<&str>,
 ) {
@@ -43,7 +43,7 @@ pub fn render(
             state,
             cursor,
             search_mode,
-            color_enabled,
+            palette,
             time_format,
             status_message,
         );
@@ -64,7 +64,7 @@ pub fn render(
         state,
         cursor,
         search_mode,
-        color_enabled,
+        palette,
         time_format,
         status_message,
     );
@@ -77,7 +77,7 @@ pub fn render(
         preview_content,
         preview_title,
         preview_path,
-        color_enabled,
+        palette,
     );
 }
 
@@ -89,7 +89,7 @@ fn render_left(
     state: &AppState,
     cursor: usize,
     search_mode: bool,
-    color_enabled: bool,
+    palette: Palette,
     time_format: TimeFormat,
     status_message: Option<&str>,
 ) {
@@ -125,7 +125,7 @@ fn render_left(
     };
 
     // 상단 facet 탭바 (탭 + Sort 정보)
-    render_facet_tabs(f, facet_area, state, color_enabled);
+    render_facet_tabs(f, facet_area, state, palette);
 
     // 검색바 (search_mode 진입 시) — 3구역: [/] [쿼리│] [N건 · Esc 취소]
     if let Some(search_area) = search_area_opt {
@@ -144,7 +144,7 @@ fn render_left(
             .split(search_area);
 
         f.render_widget(
-            Paragraph::new(Span::styled("/", cond_fg_bold(color_enabled, Color::Green))),
+            Paragraph::new(Span::styled("/", palette.fg_bold(palette.active))),
             bar_chunks[0],
         );
         f.render_widget(
@@ -155,10 +155,7 @@ fn render_left(
             bar_chunks[1],
         );
         f.render_widget(
-            Paragraph::new(Span::styled(
-                suffix,
-                cond_fg(color_enabled, Color::DarkGray),
-            )),
+            Paragraph::new(Span::styled(suffix, palette.fg(palette.muted))),
             bar_chunks[2],
         );
     }
@@ -174,20 +171,13 @@ fn render_left(
         list_area,
         state,
         cursor,
-        color_enabled,
+        palette,
         time_format,
         active_query,
     );
 
     // 하단 상태바
-    render_left_statusbar(
-        f,
-        status_area,
-        state,
-        search_mode,
-        status_message,
-        color_enabled,
-    );
+    render_left_statusbar(f, status_area, state, search_mode, status_message, palette);
 }
 
 /// 우측 패널 렌더 (preview)
@@ -201,14 +191,14 @@ fn render_right(
     preview_content: Option<&PreviewContent>,
     preview_title: &str,
     preview_path: &str,
-    color_enabled: bool,
+    palette: Palette,
 ) {
     let facet_indices = facet::facet_indices(state);
 
     if facet_indices.is_empty() || cursor >= facet_indices.len() {
         let msg = Paragraph::new("세션을 선택하세요")
             .block(Block::default().borders(Borders::ALL).title(" Preview "))
-            .style(cond_fg(color_enabled, Color::Yellow));
+            .style(palette.fg(palette.warning));
         f.render_widget(msg, area);
         return;
     }
@@ -231,25 +221,25 @@ fn render_right(
         ])
         .split(area);
 
-    let header_para = Paragraph::new(header_text).style(cond_fg_bold(color_enabled, Color::Cyan));
+    let header_para = Paragraph::new(header_text).style(palette.fg_bold(palette.accent));
     f.render_widget(header_para, layout[0]);
 
     // preview가 열렸고 콘텐츠가 준비됐을 때만 스트리밍 미리보기, 아니면 세션 요약 fallback.
     match (preview_open, preview_content) {
         (true, Some(content)) => {
-            render_preview(f, layout[1], content, preview_title, preview_path);
+            render_preview(f, layout[1], content, preview_title, preview_path, palette);
         }
         _ => {
             let msg = Paragraph::new(format!("CWD: {}", session.cwd))
                 .block(Block::default().borders(Borders::ALL).title(" Session "))
-                .style(cond_fg(color_enabled, Color::DarkGray));
+                .style(palette.fg(palette.muted));
             f.render_widget(msg, layout[1]);
         }
     }
 }
 
 /// facet 탭바 렌더 — 줄 1: 탭, 줄 2: Sort·세션 수 정보
-fn render_facet_tabs(f: &mut Frame, area: Rect, state: &AppState, color_enabled: bool) {
+fn render_facet_tabs(f: &mut Frame, area: Rect, state: &AppState, palette: Palette) {
     let counts = facet::counts(state);
 
     // 줄 1: facet 탭
@@ -261,7 +251,7 @@ fn render_facet_tabs(f: &mut Frame, area: Rect, state: &AppState, color_enabled:
         let digit = facet.to_digit();
         let label = format!("[{}:{}({})]", digit, facet.label(), count);
         let span_style = if is_current {
-            cond_fg_bold(color_enabled, Color::Cyan)
+            palette.fg_bold(palette.accent)
         } else {
             Style::default()
         };
@@ -278,7 +268,7 @@ fn render_facet_tabs(f: &mut Frame, area: Rect, state: &AppState, color_enabled:
                 state.sort.display(),
                 state.sessions.len()
             ),
-            cond_fg(color_enabled, Color::DarkGray),
+            palette.fg(palette.muted),
         ),
     ]);
 
@@ -293,17 +283,14 @@ fn render_left_statusbar(
     state: &AppState,
     search_mode: bool,
     status_message: Option<&str>,
-    color_enabled: bool,
+    palette: Palette,
 ) {
     let line = if let Some(msg) = status_message {
-        Line::from(Span::styled(
-            format!(" {msg} "),
-            cond_fg(color_enabled, Color::Green),
-        ))
+        Line::from(Span::styled(format!(" {msg} "), palette.fg(palette.active)))
     } else if search_mode {
         Line::from(Span::styled(
             " ↑↓/jk 이동  Enter 이어하기  Esc 취소",
-            cond_fg(color_enabled, Color::DarkGray),
+            palette.fg(palette.muted),
         ))
     } else {
         let hint = if state.grouped {
@@ -311,7 +298,7 @@ fn render_left_statusbar(
         } else {
             " Enter 이어하기  / 검색  s 정렬  g 그룹  Del 삭제  T 휴지통  ? 도움말  q 종료"
         };
-        Line::from(Span::styled(hint, cond_fg(color_enabled, Color::DarkGray)))
+        Line::from(Span::styled(hint, palette.fg(palette.muted)))
     };
     f.render_widget(Paragraph::new(line), area);
 }
@@ -322,7 +309,7 @@ fn render_session_list(
     area: Rect,
     state: &AppState,
     cursor: usize,
-    color_enabled: bool,
+    palette: Palette,
     time_format: TimeFormat,
     search_query: &str,
 ) {
@@ -333,7 +320,7 @@ fn render_session_list(
     if facet_indices.is_empty() {
         let p = Paragraph::new("이 facet에서 세션이 없습니다")
             .block(Block::default().borders(Borders::ALL))
-            .style(cond_fg(color_enabled, Color::Yellow));
+            .style(palette.fg(palette.warning));
         f.render_widget(p, area);
         return;
     }
@@ -354,15 +341,15 @@ fn render_session_list(
 
             // health 아이콘 + 색상 (NO_COLOR/mono 시 emoji→ASCII fallback)
             let (icon, health_style) = match session.health {
-                Health::Active => ("●", cond_fg(color_enabled, Color::Green)),
-                Health::Empty => ("○", cond_fg(color_enabled, Color::DarkGray)),
+                Health::Active => ("●", palette.fg(palette.active)),
+                Health::Empty => ("○", palette.fg(palette.muted)),
                 Health::Stale => (
-                    if color_enabled { "⏰" } else { "~" },
-                    cond_fg(color_enabled, Color::Yellow),
+                    if palette.enabled { "⏰" } else { "~" },
+                    palette.fg(palette.warning),
                 ),
                 Health::Zombie => (
-                    if color_enabled { "💀" } else { "!" },
-                    cond_fg(color_enabled, Color::Red),
+                    if palette.enabled { "💀" } else { "!" },
+                    palette.fg(palette.danger),
                 ),
             };
 
