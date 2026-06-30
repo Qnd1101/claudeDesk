@@ -31,6 +31,7 @@ pub fn render(
     preview_path: &str,
     color_enabled: bool,
     time_format: TimeFormat,
+    status_message: Option<&str>,
 ) {
     let width = area.width;
 
@@ -44,6 +45,7 @@ pub fn render(
             search_mode,
             color_enabled,
             time_format,
+            status_message,
         );
     } else if width < 120 {
         // narrow 2-pane: 좌측 30% / 우측 70%
@@ -59,6 +61,7 @@ pub fn render(
             search_mode,
             color_enabled,
             time_format,
+            status_message,
         );
         render_right(
             f,
@@ -85,6 +88,7 @@ pub fn render(
             search_mode,
             color_enabled,
             time_format,
+            status_message,
         );
         render_right(
             f,
@@ -100,7 +104,8 @@ pub fn render(
     }
 }
 
-/// 좌측 패널 렌더 (facet 탭바 + 세션 목록)
+/// 좌측 패널 렌더 (facet 탭바 + 세션 목록 + 상태바)
+#[allow(clippy::too_many_arguments)]
 fn render_left(
     f: &mut Frame,
     area: Rect,
@@ -109,21 +114,24 @@ fn render_left(
     search_mode: bool,
     color_enabled: bool,
     time_format: TimeFormat,
+    status_message: Option<&str>,
 ) {
-    if area.height < 4 {
+    if area.height < 5 {
         return; // 최소 높이 확인
     }
 
     let constraints: Vec<Constraint> = if search_mode {
         vec![
-            Constraint::Length(2), // facet 탭바
+            Constraint::Length(2), // facet 탭바 (탭 + 정보줄)
             Constraint::Length(1), // 검색바
             Constraint::Min(1),    // 세션 목록
+            Constraint::Length(1), // 상태바
         ]
     } else {
         vec![
-            Constraint::Length(2), // facet 탭바
+            Constraint::Length(2), // facet 탭바 (탭 + 정보줄)
             Constraint::Min(1),    // 세션 목록
+            Constraint::Length(1), // 상태바
         ]
     };
 
@@ -133,29 +141,49 @@ fn render_left(
         .split(area);
 
     let facet_area = layout[0];
-    let (search_area_opt, list_area) = if search_mode {
-        (Some(layout[1]), layout[2])
+    let (search_area_opt, list_area, status_area) = if search_mode {
+        (Some(layout[1]), layout[2], layout[3])
     } else {
-        (None, layout[1])
+        (None, layout[1], layout[2])
     };
 
-    // 상단 facet 탭바
+    // 상단 facet 탭바 (탭 + Sort 정보)
     render_facet_tabs(f, facet_area, state, color_enabled);
 
-    // 검색바 (search_mode 진입 시)
+    // 검색바 (search_mode 진입 시) — 3구역: [/] [쿼리│] [N건 · Esc 취소]
     if let Some(search_area) = search_area_opt {
         let query = state.search_query.as_deref().unwrap_or("");
         let match_count = facet::facet_indices(state).len();
-        let search_line = Line::from(vec![
-            Span::styled("/", cond_fg_bold(color_enabled, Color::Green)),
-            Span::raw(query.to_string()),
-            Span::styled("│", Style::default()),
-            Span::styled(
-                format!(" ({match_count}건)"),
+        let suffix = format!("({}건 · Esc 취소)", match_count);
+        let suffix_width = suffix.chars().count() as u16;
+
+        let bar_chunks = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([
+                Constraint::Length(1),
+                Constraint::Min(0),
+                Constraint::Length(suffix_width),
+            ])
+            .split(search_area);
+
+        f.render_widget(
+            Paragraph::new(Span::styled("/", cond_fg_bold(color_enabled, Color::Green))),
+            bar_chunks[0],
+        );
+        f.render_widget(
+            Paragraph::new(Line::from(vec![
+                Span::raw(query.to_string()),
+                Span::styled("│", Style::default()),
+            ])),
+            bar_chunks[1],
+        );
+        f.render_widget(
+            Paragraph::new(Span::styled(
+                suffix,
                 cond_fg(color_enabled, Color::DarkGray),
-            ),
-        ]);
-        f.render_widget(Paragraph::new(search_line), search_area);
+            )),
+            bar_chunks[2],
+        );
     }
 
     // 세션 목록
@@ -172,6 +200,16 @@ fn render_left(
         color_enabled,
         time_format,
         active_query,
+    );
+
+    // 하단 상태바
+    render_left_statusbar(
+        f,
+        status_area,
+        state,
+        search_mode,
+        status_message,
+        color_enabled,
     );
 }
 
@@ -241,34 +279,72 @@ fn render_right(
     }
 }
 
-/// facet 탭바 렌더
+/// facet 탭바 렌더 — 줄 1: 탭, 줄 2: Sort·세션 수 정보
 fn render_facet_tabs(f: &mut Frame, area: Rect, state: &AppState, color_enabled: bool) {
     let counts = facet::counts(state);
 
+    // 줄 1: facet 탭
     let mut spans = Vec::new();
-    spans.push(Span::raw("  ")); // 좌측 여백
-
+    spans.push(Span::raw("  "));
     for (idx, facet) in Facet::all().iter().enumerate() {
         let is_current = state.facet == *facet;
         let count = counts[idx];
         let digit = facet.to_digit();
         let label = format!("[{}:{}({})]", digit, facet.label(), count);
-
         let span_style = if is_current {
             cond_fg_bold(color_enabled, Color::Cyan)
         } else {
             Style::default()
         };
-
         spans.push(Span::styled(label, span_style));
         spans.push(Span::raw("  "));
     }
 
-    let line = Line::from(spans);
-    let para = Paragraph::new(line)
-        .block(Block::default().borders(Borders::BOTTOM))
-        .style(Style::default());
+    // 줄 2: Sort 상태 + 세션 수
+    let info_line = Line::from(vec![
+        Span::raw("  "),
+        Span::styled(
+            format!(
+                "Sort: {}  |  {}세션",
+                state.sort.display(),
+                state.sessions.len()
+            ),
+            cond_fg(color_enabled, Color::DarkGray),
+        ),
+    ]);
+
+    let para = Paragraph::new(vec![Line::from(spans), info_line]);
     f.render_widget(para, area);
+}
+
+/// 좌측 패널 하단 상태바 렌더 — 키 힌트 또는 임시 메시지
+fn render_left_statusbar(
+    f: &mut Frame,
+    area: Rect,
+    state: &AppState,
+    search_mode: bool,
+    status_message: Option<&str>,
+    color_enabled: bool,
+) {
+    let line = if let Some(msg) = status_message {
+        Line::from(Span::styled(
+            format!(" {msg} "),
+            cond_fg(color_enabled, Color::Green),
+        ))
+    } else if search_mode {
+        Line::from(Span::styled(
+            " ↑↓/jk 이동  Enter 이어하기  Esc 취소",
+            cond_fg(color_enabled, Color::DarkGray),
+        ))
+    } else {
+        let hint = if state.grouped {
+            " Enter 이어하기  / 검색  s 정렬  g 그룹  Tab 접기/펼치기  Del 삭제  ? 도움말  q 종료"
+        } else {
+            " Enter 이어하기  / 검색  s 정렬  g 그룹  Del 삭제  T 휴지통  ? 도움말  q 종료"
+        };
+        Line::from(Span::styled(hint, cond_fg(color_enabled, Color::DarkGray)))
+    };
+    f.render_widget(Paragraph::new(line), area);
 }
 
 /// 세션 목록 렌더

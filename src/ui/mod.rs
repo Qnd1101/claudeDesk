@@ -403,6 +403,7 @@ impl App {
                                 &preview_path,
                                 color_enabled,
                                 time_format,
+                                self.status_message.as_deref(),
                             );
                         }
                     }
