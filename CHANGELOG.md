@@ -5,6 +5,16 @@
 
 ## [Unreleased]
 
+## [0.15.0] - 2026-06-30
+
+### Changed (코드 품질 A + 접근성 B)
+- **Health 아이콘 NO_COLOR fallback:** `NO_COLOR`/`mono` 모드 시 이모지(`⏰`/`💀`) 대신 ASCII 기호(`~`/`!`)로 fallback. 색 없이도 Stale·Zombie 구분 가능 (`src/ui/facet_view.rs`).
+- **facet_view.rs 단순화(code-simplifier):** `render()` 2-pane 중복 분기 제거(단일 `left_pct` 계산으로 통합), `render_right()` preview fallback 중복 제거(`match (preview_open, preview_content)` 단일 경로), WHAT 주석 정리. 동작 변경 없음.
+- **접근성 체크리스트 `[x]` 업데이트:** `docs/02_UIUX_DESIGN.md` §8 6항목 모두 구현 완료 확인·표시.
+
+### Tests
+- 185 테스트 통과, clippy `-D warnings`·fmt 그린.
+
 ## [0.14.0] - 2026-06-30
 
 ### Added (facet 뷰 UX 소형 패치 — UIUX §2.1/§2.2 정합)
