@@ -35,8 +35,8 @@ pub fn render(
 ) {
     let width = area.width;
 
+    // <90: 단일 패널(목록 전체 폭). 그 외엔 2-pane이며 좌측 비율만 폭에 따라 달라진다.
     if width < 90 {
-        // single-pane: 좌측 목록만 전체 폭
         render_left(
             f,
             area,
@@ -47,61 +47,38 @@ pub fn render(
             time_format,
             status_message,
         );
-    } else if width < 120 {
-        // narrow 2-pane: 좌측 30% / 우측 70%
-        let chunks = Layout::default()
-            .direction(Direction::Horizontal)
-            .constraints([Constraint::Percentage(30), Constraint::Percentage(70)])
-            .split(area);
-        render_left(
-            f,
-            chunks[0],
-            state,
-            cursor,
-            search_mode,
-            color_enabled,
-            time_format,
-            status_message,
-        );
-        render_right(
-            f,
-            chunks[1],
-            state,
-            cursor,
-            preview_open,
-            preview_content,
-            preview_title,
-            preview_path,
-            color_enabled,
-        );
-    } else {
-        // full 2-pane: 좌측 25% / 우측 75%
-        let chunks = Layout::default()
-            .direction(Direction::Horizontal)
-            .constraints([Constraint::Percentage(25), Constraint::Percentage(75)])
-            .split(area);
-        render_left(
-            f,
-            chunks[0],
-            state,
-            cursor,
-            search_mode,
-            color_enabled,
-            time_format,
-            status_message,
-        );
-        render_right(
-            f,
-            chunks[1],
-            state,
-            cursor,
-            preview_open,
-            preview_content,
-            preview_title,
-            preview_path,
-            color_enabled,
-        );
+        return;
     }
+
+    let left_pct = if width < 120 { 30 } else { 25 };
+    let chunks = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([
+            Constraint::Percentage(left_pct),
+            Constraint::Percentage(100 - left_pct),
+        ])
+        .split(area);
+    render_left(
+        f,
+        chunks[0],
+        state,
+        cursor,
+        search_mode,
+        color_enabled,
+        time_format,
+        status_message,
+    );
+    render_right(
+        f,
+        chunks[1],
+        state,
+        cursor,
+        preview_open,
+        preview_content,
+        preview_title,
+        preview_path,
+        color_enabled,
+    );
 }
 
 /// 좌측 패널 렌더 (facet 탭바 + 세션 목록 + 상태바)
@@ -226,11 +203,9 @@ fn render_right(
     preview_path: &str,
     color_enabled: bool,
 ) {
-    // 현재 cursor에 해당하는 session_id 찾기
     let facet_indices = facet::facet_indices(state);
 
     if facet_indices.is_empty() || cursor >= facet_indices.len() {
-        // 세션 없음
         let msg = Paragraph::new("세션을 선택하세요")
             .block(Block::default().borders(Borders::ALL).title(" Preview "))
             .style(cond_fg(color_enabled, Color::Yellow));
@@ -241,7 +216,6 @@ fn render_right(
     let session_idx = facet_indices[cursor];
     let session = &state.sessions[session_idx];
 
-    // 헤더: session_id, cwd, msg_count, health
     let header_text = format!(
         "ID: {}  |  MSG: {}  |  Health: {}",
         &session.session_id[..session.session_id.len().min(8)],
@@ -257,25 +231,20 @@ fn render_right(
         ])
         .split(area);
 
-    // 헤더 렌더
     let header_para = Paragraph::new(header_text).style(cond_fg_bold(color_enabled, Color::Cyan));
     f.render_widget(header_para, layout[0]);
 
-    // preview 렌더
-    if preview_open {
-        if let Some(content) = preview_content {
+    // preview가 열렸고 콘텐츠가 준비됐을 때만 스트리밍 미리보기, 아니면 세션 요약 fallback.
+    match (preview_open, preview_content) {
+        (true, Some(content)) => {
             render_preview(f, layout[1], content, preview_title, preview_path);
-        } else {
+        }
+        _ => {
             let msg = Paragraph::new(format!("CWD: {}", session.cwd))
                 .block(Block::default().borders(Borders::ALL).title(" Session "))
                 .style(cond_fg(color_enabled, Color::DarkGray));
             f.render_widget(msg, layout[1]);
         }
-    } else {
-        let msg = Paragraph::new(format!("CWD: {}", session.cwd))
-            .block(Block::default().borders(Borders::ALL).title(" Session "))
-            .style(cond_fg(color_enabled, Color::DarkGray));
-        f.render_widget(msg, layout[1]);
     }
 }
 
@@ -383,12 +352,18 @@ fn render_session_list(
             let session = &state.sessions[real_idx];
             let is_cursor = display_i == cursor;
 
-            // health 아이콘 + 색상
+            // health 아이콘 + 색상 (NO_COLOR/mono 시 emoji→ASCII fallback)
             let (icon, health_style) = match session.health {
                 Health::Active => ("●", cond_fg(color_enabled, Color::Green)),
                 Health::Empty => ("○", cond_fg(color_enabled, Color::DarkGray)),
-                Health::Stale => ("⏰", cond_fg(color_enabled, Color::Yellow)),
-                Health::Zombie => ("💀", cond_fg(color_enabled, Color::Red)),
+                Health::Stale => (
+                    if color_enabled { "⏰" } else { "~" },
+                    cond_fg(color_enabled, Color::Yellow),
+                ),
+                Health::Zombie => (
+                    if color_enabled { "💀" } else { "!" },
+                    cond_fg(color_enabled, Color::Red),
+                ),
             };
 
             let marker = if is_cursor { ">" } else { " " };
