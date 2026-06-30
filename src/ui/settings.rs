@@ -9,14 +9,14 @@
 //!   Esc         : 저장 없이 닫기 (임시 복사본 폐기)
 use ratatui::{
     layout::Alignment,
-    style::{Color, Modifier, Style},
+    style::{Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Clear, Paragraph},
     Frame,
 };
 
 use super::layout::centered_rect;
-use super::theme::{cond_fg, cond_fg_bold};
+use super::theme::Palette;
 use crate::config::Config;
 
 /// 설정 화면 렌더에 전달할 데이터
@@ -29,8 +29,8 @@ pub struct SettingsData<'a> {
     pub path_editing: bool,
     /// 경로 편집 중인 버퍼 (path_editing=true일 때만 의미 있음)
     pub path_input: &'a str,
-    /// 색상 활성 여부 (T11.3)
-    pub color_enabled: bool,
+    /// 색상 팔레트 (T11.3)
+    pub palette: Palette,
 }
 
 /// 설정 항목 개수 (상수로 노출해 키 핸들러와 공유)
@@ -54,8 +54,9 @@ pub fn render_settings(f: &mut Frame, data: &SettingsData<'_>) {
 
     f.render_widget(Clear, area);
 
-    let border_style = cond_fg(data.color_enabled, Color::Cyan);
-    let title_style = cond_fg_bold(data.color_enabled, Color::Cyan);
+    let palette = data.palette;
+    let border_style = palette.fg(palette.accent);
+    let title_style = palette.fg_bold(palette.accent);
     let block = Block::default()
         .borders(Borders::ALL)
         .title(Span::styled(" Settings ", title_style))
@@ -73,9 +74,9 @@ pub fn render_settings(f: &mut Frame, data: &SettingsData<'_>) {
 
         let (value_str, options_str) = build_item_display(i, data);
 
-        let marker_style = cond_fg(data.color_enabled, Color::Yellow);
+        let marker_style = palette.fg(palette.warning);
         let label_style = if is_cursor {
-            cond_fg_bold(data.color_enabled, Color::Yellow)
+            palette.fg_bold(palette.warning)
         } else {
             Style::default()
         };
@@ -84,7 +85,7 @@ pub fn render_settings(f: &mut Frame, data: &SettingsData<'_>) {
         } else {
             Style::default()
         };
-        let options_style = cond_fg(data.color_enabled, Color::DarkGray);
+        let options_style = palette.fg(palette.muted);
 
         let mut spans = vec![
             Span::styled(marker, marker_style),
@@ -102,7 +103,7 @@ pub fn render_settings(f: &mut Frame, data: &SettingsData<'_>) {
         lines.push(Line::from(""));
         lines.push(Line::from(vec![
             Span::raw("  "),
-            Span::styled("경로: ", cond_fg(data.color_enabled, Color::Yellow)),
+            Span::styled("경로: ", palette.fg(palette.warning)),
             Span::styled(
                 data.path_input,
                 Style::default().add_modifier(Modifier::BOLD),
@@ -111,16 +112,13 @@ pub fn render_settings(f: &mut Frame, data: &SettingsData<'_>) {
         ]));
         lines.push(Line::from(vec![
             Span::raw("  "),
-            Span::styled(
-                "Enter 확인 · Esc 취소",
-                cond_fg(data.color_enabled, Color::DarkGray),
-            ),
+            Span::styled("Enter 확인 · Esc 취소", palette.fg(palette.muted)),
         ]));
     }
 
     // ── 푸터 ──────────────────────────────────────────────────────────────
     lines.push(Line::from(""));
-    lines.push(build_footer_line(data.color_enabled));
+    lines.push(build_footer_line(palette));
     lines.push(Line::from(""));
 
     let para = Paragraph::new(lines).alignment(Alignment::Left);
@@ -207,18 +205,18 @@ fn build_item_display(row: usize, data: &SettingsData<'_>) -> (String, String) {
 }
 
 /// 하단 키 안내 행
-fn build_footer_line(color_enabled: bool) -> Line<'static> {
+fn build_footer_line(palette: Palette) -> Line<'static> {
     Line::from(vec![
         Span::raw(" "),
-        Span::styled("↑↓ 이동", cond_fg(color_enabled, Color::Yellow)),
+        Span::styled("↑↓ 이동", palette.fg(palette.warning)),
         Span::raw("  ·  "),
-        Span::styled("←→ 변경", cond_fg(color_enabled, Color::Yellow)),
+        Span::styled("←→ 변경", palette.fg(palette.warning)),
         Span::raw("  ·  "),
-        Span::styled("Enter 확인/토글", cond_fg(color_enabled, Color::Yellow)),
+        Span::styled("Enter 확인/토글", palette.fg(palette.warning)),
         Span::raw("  ·  "),
-        Span::styled("s 저장", cond_fg_bold(color_enabled, Color::Green)),
+        Span::styled("s 저장", palette.fg_bold(palette.active)),
         Span::raw("  ·  "),
-        Span::styled("Esc 닫기", cond_fg(color_enabled, Color::DarkGray)),
+        Span::styled("Esc 닫기", palette.fg(palette.muted)),
     ])
 }
 
@@ -249,7 +247,7 @@ mod tests {
             cursor: 0,
             path_editing: false,
             path_input: "",
-            color_enabled: false,
+            palette: Palette::mono(),
         };
         let (val, hint) = build_item_display(0, &data);
         assert!(!val.is_empty(), "projects_root 값이 비어 있으면 안 됨");
@@ -267,7 +265,7 @@ mod tests {
             cursor: 1,
             path_editing: false,
             path_input: "",
-            color_enabled: false,
+            palette: Palette::mono(),
         };
         let (val, hint) = build_item_display(1, &data);
         // 기본값: Modified ↓
@@ -287,7 +285,7 @@ mod tests {
             cursor: 2,
             path_editing: false,
             path_input: "",
-            color_enabled: false,
+            palette: Palette::mono(),
         };
         let (val, hint) = build_item_display(2, &data);
         assert_eq!(val.trim(), "Relative", "기본 TimeFormat 표시 불일치: {val}");
@@ -305,7 +303,7 @@ mod tests {
             cursor: 4,
             path_editing: false,
             path_input: "",
-            color_enabled: false,
+            palette: Palette::mono(),
         };
         let (val, hint) = build_item_display(4, &data);
         assert!(
@@ -324,7 +322,7 @@ mod tests {
             cursor: 5,
             path_editing: false,
             path_input: "",
-            color_enabled: false,
+            palette: Palette::mono(),
         };
         let (val, hint) = build_item_display(5, &data);
         assert_eq!(val.trim(), "Auto", "기본 Theme 표시 불일치: {val}");
@@ -340,7 +338,7 @@ mod tests {
             cursor: 0,
             path_editing: false,
             path_input: "",
-            color_enabled: false,
+            palette: Palette::mono(),
         };
         let (_, hint) = build_item_display(2, &data);
         assert!(

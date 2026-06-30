@@ -1,7 +1,7 @@
 /// 휴지통 화면 렌더 (FR-11, §2.7)
 use ratatui::{
     layout::{Constraint, Direction, Layout},
-    style::{Color, Modifier, Style},
+    style::{Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Cell, Paragraph, Row, Table, TableState},
     Frame,
@@ -9,6 +9,7 @@ use ratatui::{
 
 use crate::trash::TrashEntry;
 
+use super::theme::Palette;
 use super::time::relative_time;
 use crate::ui::list::safe_truncate;
 
@@ -17,11 +18,13 @@ use crate::ui::list::safe_truncate;
 /// - entries: 표시할 항목 (삭제 시각 내림차순 정렬됨)
 /// - cursor: 현재 커서 위치
 /// - selected_ids: 다중선택된 session_id 집합
+/// - palette: 색상 팔레트
 pub fn render_trash(
     f: &mut Frame,
     entries: &[&TrashEntry],
     cursor: usize,
     selected_ids: &std::collections::HashSet<String>,
+    palette: Palette,
 ) {
     let area = f.area();
 
@@ -36,15 +39,10 @@ pub fn render_trash(
 
     // ── 헤더 ──────────────────────────────────────────────────────────────
     let header_line = Line::from(vec![
-        Span::styled(
-            " Trash ",
-            Style::default()
-                .fg(Color::Yellow)
-                .add_modifier(Modifier::BOLD),
-        ),
+        Span::styled(" Trash ", palette.fg_bold(palette.warning)),
         Span::styled(
             format!("({} 항목)", entries.len()),
-            Style::default().fg(Color::DarkGray),
+            palette.fg(palette.muted),
         ),
     ]);
     f.render_widget(Paragraph::new(header_line), chunks[0]);
@@ -53,9 +51,9 @@ pub fn render_trash(
     if entries.is_empty() {
         let p = Paragraph::new("휴지통이 비어 있습니다.")
             .block(Block::default().borders(Borders::ALL).title(" Trash "))
-            .style(Style::default().fg(Color::DarkGray));
+            .style(palette.fg(palette.muted));
         f.render_widget(p, chunks[1]);
-        render_trash_statusbar(f, chunks[2]);
+        render_trash_statusbar(f, chunks[2], palette);
         return;
     }
 
@@ -110,7 +108,7 @@ pub fn render_trash(
             let style = if is_sel_cursor {
                 Style::default().add_modifier(Modifier::REVERSED)
             } else if is_checked {
-                Style::default().fg(Color::Cyan)
+                palette.fg(palette.accent)
             } else {
                 Style::default()
             };
@@ -141,13 +139,13 @@ pub fn render_trash(
 
     f.render_stateful_widget(table, chunks[1], &mut table_state);
 
-    render_trash_statusbar(f, chunks[2]);
+    render_trash_statusbar(f, chunks[2], palette);
 }
 
-fn render_trash_statusbar(f: &mut Frame, area: ratatui::layout::Rect) {
+fn render_trash_statusbar(f: &mut Frame, area: ratatui::layout::Rect, palette: Palette) {
     let spans = vec![Span::styled(
         " Space 선택 · r 복구 · D 영구삭제 · Esc/T 닫기",
-        Style::default().fg(Color::DarkGray),
+        palette.fg(palette.muted),
     )];
     let status = Paragraph::new(Line::from(spans));
     f.render_widget(status, area);

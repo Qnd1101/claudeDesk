@@ -1,6 +1,6 @@
 use ratatui::{
     layout::{Constraint, Direction, Layout},
-    style::{Color, Modifier, Style},
+    style::{Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Cell, Paragraph, Row, Table, TableState},
     Frame,
@@ -13,7 +13,7 @@ use crate::preview::PreviewContent;
 use crate::service::{AppState, DisplayRow};
 
 use super::preview::render_preview;
-use super::theme::{cond_fg, cond_fg_bold};
+use super::theme::Palette;
 use super::time::format_time;
 
 /// 미리보기 패널을 활성화하기 위한 최소 터미널 폭(칸)
@@ -26,7 +26,7 @@ pub const PREVIEW_MIN_WIDTH: u16 = 100;
 /// - `preview_open`: 미리보기 패널 열림 여부.
 /// - `preview_content`: 미리보기 내용 (None이면 미리보기 미렌더).
 /// - `preview_title`: 미리보기 패널 타이틀에 쓸 세션 제목.
-/// - `color_enabled`: T11.3 색상 활성 여부 (false=Mono/NO_COLOR).
+/// - `palette`: T11.3 색상 팔레트 (Light/Dark/Mono 테마 포함).
 /// - `time_format`: T11.2 시간 표시 형식 (Relative=상대시간/Absolute=절대시간).
 #[allow(clippy::too_many_arguments)]
 pub fn render_list(
@@ -40,7 +40,7 @@ pub fn render_list(
     preview_content: Option<&PreviewContent>,
     preview_title: &str,
     preview_path: &str,
-    color_enabled: bool,
+    palette: Palette,
     time_format: TimeFormat,
 ) {
     let full_area = f.area();
@@ -92,20 +92,20 @@ pub fn render_list(
 
     // ── 헤더 ──────────────────────────────────────────────────────────────
     let header_line = Line::from(vec![
-        Span::styled(" claudeDesk ", cond_fg_bold(color_enabled, Color::Cyan)),
+        Span::styled(" claudeDesk ", palette.fg_bold(palette.accent)),
         Span::styled(
             format!("v{}", env!("CARGO_PKG_VERSION")),
-            cond_fg(color_enabled, Color::DarkGray),
+            palette.fg(palette.muted),
         ),
         Span::raw("  "),
         Span::styled(
             format!("Sort: {}", state.sort.display()),
-            cond_fg(color_enabled, Color::Yellow),
+            palette.fg(palette.warning),
         ),
         if !selected_ids.is_empty() {
             Span::styled(
                 format!("  [{}개 선택]", selected_ids.len()),
-                cond_fg_bold(color_enabled, Color::Cyan),
+                palette.fg_bold(palette.accent),
             )
         } else {
             Span::raw("")
@@ -132,7 +132,7 @@ pub fn render_list(
         f.render_widget(
             Paragraph::new(Line::from(Span::styled(
                 " /",
-                cond_fg_bold(color_enabled, Color::Green),
+                palette.fg_bold(palette.active),
             ))),
             bar_chunks[0],
         );
@@ -144,10 +144,7 @@ pub fn render_list(
         f.render_widget(Paragraph::new(query_line), bar_chunks[1]);
 
         f.render_widget(
-            Paragraph::new(Line::from(Span::styled(
-                suffix,
-                cond_fg(color_enabled, Color::DarkGray),
-            ))),
+            Paragraph::new(Line::from(Span::styled(suffix, palette.fg(palette.muted)))),
             bar_chunks[2],
         );
     }
@@ -164,7 +161,7 @@ pub fn render_list(
         };
         let p = Paragraph::new(empty_msg)
             .block(Block::default().borders(Borders::ALL).title(" Sessions "))
-            .style(cond_fg(color_enabled, Color::Yellow));
+            .style(palette.fg(palette.warning));
         f.render_widget(p, table_chunk);
 
         render_statusbar(
@@ -177,7 +174,7 @@ pub fn render_list(
             status_message,
             preview_open && preview_area_opt.is_some(),
             "",
-            color_enabled,
+            palette,
         );
         return;
     }
@@ -190,7 +187,7 @@ pub fn render_list(
                     .borders(Borders::ALL)
                     .title(" Sessions (0) "),
             )
-            .style(cond_fg(color_enabled, Color::Yellow));
+            .style(palette.fg(palette.warning));
         f.render_widget(p, table_chunk);
         render_statusbar(
             f,
@@ -202,7 +199,7 @@ pub fn render_list(
             status_message,
             preview_open && preview_area_opt.is_some(),
             "",
-            color_enabled,
+            palette,
         );
         return;
     }
@@ -243,9 +240,11 @@ pub fn render_list(
                     let arrow = if *collapsed { "▸" } else { "▾" };
                     let title_text = format!("{} {}  ({})", arrow, project_name, count);
                     let style = if is_cursor {
-                        cond_fg_bold(color_enabled, Color::Cyan).add_modifier(Modifier::REVERSED)
+                        palette
+                            .fg_bold(palette.accent)
+                            .add_modifier(Modifier::REVERSED)
                     } else {
-                        cond_fg_bold(color_enabled, Color::Cyan)
+                        palette.fg_bold(palette.accent)
                     };
                     let mut cells = vec![Cell::from(""), Cell::from(title_text)];
                     if show_project {
@@ -301,10 +300,10 @@ pub fn render_list(
                         Style::default().add_modifier(Modifier::REVERSED)
                     } else if is_checked {
                         // ✓ 마커가 있으므로 색 없이도 선택 상태 식별 가능 (§5.7)
-                        cond_fg(color_enabled, Color::Cyan)
+                        palette.fg(palette.accent)
                     } else if session.is_active {
                         // ● 마커가 있으므로 색 없이도 활성 상태 식별 가능 (§5.7)
-                        cond_fg(color_enabled, Color::Green)
+                        palette.fg(palette.active)
                     } else {
                         Style::default()
                     };
@@ -348,12 +347,19 @@ pub fn render_list(
         status_message,
         preview_open && preview_area_opt.is_some(),
         preview_path,
-        color_enabled,
+        palette,
     );
 
     // ── FR-08: 미리보기 패널 렌더 ────────────────────────────────────────
     if let (Some(preview_area), Some(content)) = (preview_area_opt, preview_content) {
-        render_preview(f, preview_area, content, preview_title, preview_path);
+        render_preview(
+            f,
+            preview_area,
+            content,
+            preview_title,
+            preview_path,
+            palette,
+        );
     }
 }
 
@@ -395,7 +401,7 @@ fn render_statusbar(
     status_message: Option<&str>,
     preview_active: bool,
     cursor_path: &str,
-    color_enabled: bool,
+    palette: Palette,
 ) {
     let mut spans = vec![];
 
@@ -403,7 +409,7 @@ fn render_statusbar(
     if let Some(msg) = status_message {
         spans.push(Span::styled(
             format!(" {} ", msg),
-            cond_fg(color_enabled, Color::Green),
+            palette.fg(palette.active),
         ));
         let status = Paragraph::new(Line::from(spans));
         f.render_widget(status, area);
@@ -417,7 +423,7 @@ fn render_statusbar(
                 " ! Skipped: {}줄 {}파일 ",
                 state.stats.skipped_lines, state.stats.skipped_files
             ),
-            cond_fg(color_enabled, Color::Red),
+            palette.fg(palette.danger),
         ));
         spans.push(Span::raw("| "));
     }
@@ -425,23 +431,20 @@ fn render_statusbar(
     // 세션 수
     spans.push(Span::styled(
         format!(" {}개 세션 ", state.sessions.len()),
-        cond_fg(color_enabled, Color::DarkGray),
+        palette.fg(palette.muted),
     ));
     spans.push(Span::raw("| "));
 
     // 미리보기 활성 표시
     if preview_active {
-        spans.push(Span::styled(
-            "[미리보기] ",
-            cond_fg(color_enabled, Color::Cyan),
-        ));
+        spans.push(Span::styled("[미리보기] ", palette.fg(palette.accent)));
     }
 
     // 키 힌트
     if search_mode {
         spans.push(Span::styled(
             " ↑↓ 이동  Enter 이어하기  Esc 검색 취소",
-            cond_fg(color_enabled, Color::DarkGray),
+            palette.fg(palette.muted),
         ));
     } else if !selected_ids.is_empty() {
         // 다중선택 활성 시 선택 관련 키힌트
@@ -450,7 +453,7 @@ fn render_statusbar(
                 " {}개 선택됨  Space 선택토글  a 전체선택/해제  Del 삭제  Esc 선택 해제",
                 selected_ids.len()
             ),
-            cond_fg(color_enabled, Color::Cyan),
+            palette.fg(palette.accent),
         ));
     } else {
         // ① 커서 세션의 작업 폴더 풀경로(중간 생략)를 힌트 앞에 항상 노출.
@@ -458,7 +461,7 @@ fn render_statusbar(
         if !cursor_path.is_empty() {
             spans.push(Span::styled(
                 format!(" {} ", middle_truncate(cursor_path, 50)),
-                cond_fg_bold(color_enabled, Color::Yellow),
+                palette.fg_bold(palette.warning),
             ));
             spans.push(Span::raw("| "));
         }
@@ -469,7 +472,7 @@ fn render_statusbar(
         hint.push_str(
             "  p 미리보기  Space 선택  a 전체선택  o 오래된선택  , 설정  Del 삭제  T 휴지통  ? 도움말  q 종료",
         );
-        spans.push(Span::styled(hint, cond_fg(color_enabled, Color::DarkGray)));
+        spans.push(Span::styled(hint, palette.fg(palette.muted)));
     }
 
     let status = Paragraph::new(Line::from(spans));
